@@ -27,12 +27,13 @@ struct WaterRenderingTests {
         let started = Date()
         for frame in 1...480 {
             fluid.model.advance(by: 1 / 60)
-            if ![8, 120, 195, 210, 480].contains(frame) { continue }
+            if ![8, 120, 195, 210, 214, 480].contains(frame) { continue }
             if frame == 210 {
                 #expect(!fluid.model.isPouring)
                 #expect(!fluid.model.streamVertices().isEmpty)
                 #expect(abs(fluid.model.fraction - config.fill) < 1e-9)
             }
+            if frame == 214 { #expect(fluid.model.detachedDropCount > 0) }
             fluid.uploadSurface()
             let command = try #require(queue.makeCommandBuffer())
             let pass = MTLRenderPassDescriptor()
@@ -101,6 +102,6 @@ struct WaterRenderingTests {
             #expect(CGImageDestinationFinalize(destination))
             print("Water render: \(url.path)")
         }
-        print("Water model and offscreen rendering: \(Date().timeIntervalSince(started) / 480 * 1000) ms/frame (debug, includes five captures)")
+        print("Water model and offscreen rendering: \(Date().timeIntervalSince(started) / 480 * 1000) ms/frame (debug, includes six captures)")
     }
 }

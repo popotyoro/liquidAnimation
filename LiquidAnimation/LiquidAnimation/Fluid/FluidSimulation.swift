@@ -56,8 +56,13 @@ final class WaterModel {
         var position: SIMD2<Double> // 単位はm、yは下向き。描画座標と上下が逆。
         var velocity: SIMD2<Double>
         var area: Double
+        var detachedFromStream = false
     }
     private var drops: [Drop] = []
+    private var attemptedTailSeparation = false
+    private var separatedTailStart: Double?
+    private(set) var separatedTailArea = 0.0
+    var detachedDropCount: Int { drops.filter(\.detachedFromStream).count }
     private var lastSplashTime = -1.0
     private var splashSequence = 0
     var splashCount: Int { drops.count }
@@ -162,6 +167,9 @@ final class WaterModel {
         time = 0
         parcels.removeAll(keepingCapacity: true)
         drops.removeAll(keepingCapacity: true)
+        attemptedTailSeparation = false
+        separatedTailStart = nil
+        separatedTailArea = 0
         lastSplashTime = -1
         splashSequence = 0
         bubbles.removeAll(keepingCapacity: true)
@@ -200,6 +208,7 @@ final class WaterModel {
             advanceBubbles(dt: dt)
             for i in impactImpulse.indices { impactImpulse[i] = 0 }
             depositArrivals()
+            detachThinTail()
             updateImpactPressure(dt: dt)
             solveShallowWater(dt: dt)
             remaining -= dt
@@ -292,6 +301,36 @@ final class WaterModel {
             }
         }
         parcels = survivors
+    }
+
+    /// 小さな比較試作として、停止後の細い末尾だけを最大3滴へ分ける。
+    /// 表面張力による分裂は解かず、減流区間の最後の40%を対象とする。
+    private func detachThinTail() {
+        guard !attemptedTailSeparation, targetArea > 0, !isPouring,
+              time >= pourDuration + 0.05 else { return }
+        attemptedTailSeparation = true
+        let cutTime = pourDuration - rampDuration * 0.4
+        let tail = parcels.filter { $0.time >= cutTime }
+        guard tail.count >= 3, drops.count + 3 <= Self.maximumDrops else { return }
+        var areas = [Double](repeating: 0, count: 3)
+        var moments = areas
+        for parcel in tail {
+            let group = min(2, max(0, Int((parcel.time - cutTime) / (pourDuration - cutTime) * 3)))
+            areas[group] += parcel.area
+            moments[group] += parcel.time * parcel.area
+        }
+        for group in areas.indices where areas[group] > 0 {
+            let age = time - moments[group] / areas[group]
+            let point = flightPosition(age: age)
+            let onWall = point.x <= 0.002 || point.x >= width - 0.002
+            drops.append(Drop(position: point,
+                velocity: SIMD2(onWall ? 0 : inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * age),
+                area: areas[group], detachedFromStream: true))
+        }
+        // 水流から除いた面積をそのまま水滴へ移す。投入量・着水済み量は変えない。
+        separatedTailArea = areas.reduce(0, +)
+        separatedTailStart = cutTime
+        parcels.removeAll { $0.time >= cutTime }
     }
 
     /// 飛沫を重力で落とし、壁では減速、水面への再突入では全量を戻す。
@@ -469,15 +508,15 @@ final class WaterModel {
         }
     }
 
-    // 基本97断面 + 増減区間の最大24断面 + 先端の最大17断面。各断面は左右2頂点。
-    static let maximumStreamVertices = 276
+    // 基本97 + 増減区間24 + 先端17 + 分離後の末尾12断面。各断面は左右2頂点。
+    static let maximumStreamVertices = 300
 
     /// 投入時刻ごとの流量から水流の帯を作る。物理モデルの水量は変更しない。
     func streamVertices() -> [WaterVertex] {
         guard let first = parcels.first else { return [] }
         // 角度が大きい場合も入口の切断面が画面内に見えないよう、上流を画面外へ延ばす。
         let inletExtension = -(nominalRate / inletSpeed + 0.02) / (inletSpeed * cos(angle))
-        let youngest = isPouring ? inletExtension : max(0, time - pourDuration)
+        let youngest = isPouring ? inletExtension : max(0, time - (separatedTailStart ?? pourDuration))
         var oldest = time - first.time
         // 最古の未着水区間は水面の手前にある。近接時だけ描画上の先端を補間し、隙間を抑える。
         let head = flightPosition(age: oldest)
@@ -517,6 +556,16 @@ final class WaterModel {
                 ages.append(oldest - headDuration * (1 + cos(theta)) / 2)
             }
         }
+        // 水滴に移した領域を帯でつなぎ直さず、残った帯の末尾を丸く閉じる。
+        let tailSpeed = simd_length(SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * max(0, youngest)))
+        let tailRadius = emissionRate(at: separatedTailStart ?? pourDuration) / (2 * tailSpeed)
+        let tailDuration = min(max(0, oldest - youngest), tailRadius / tailSpeed)
+        if separatedTailStart != nil && tailDuration > 0 {
+            for i in 0..<12 {
+                let theta = Double(i) / 12 * .pi / 2
+                ages.append(youngest + tailDuration * (1 - cos(theta)))
+            }
+        }
         ages.sort()
         for (index, age) in ages.enumerated() {
             // 現在の流量を帯全体に適用せず、その水が投入された時刻の流量を使う。
@@ -546,6 +595,10 @@ final class WaterModel {
                 let roundWidth = headRadius * sqrt(max(0, 1 - pow(2 * progress - 1, 2)))
                 // ふくらみの後半を楕円の輪郭で閉じ、最後の断面は幅0にする。
                 halfWidth = progress >= 0.5 ? roundWidth : max(halfWidth, roundWidth)
+            }
+            if separatedTailStart != nil && tailDuration > 0 && age < youngest + tailDuration {
+                let progress = max(0, (age - youngest) / tailDuration)
+                halfWidth *= sqrt(max(0, 1 - pow(1 - progress, 2)))
             }
             if !onWall { point += normal * wobble }
             for side in [-1.0, 1.0] {

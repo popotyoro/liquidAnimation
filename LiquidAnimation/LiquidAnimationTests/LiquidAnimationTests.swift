@@ -190,6 +190,29 @@ struct LiquidAnimationTests {
         #expect(MemoryLayout<BubbleVertex>.stride == 32)
     }
 
+    @Test(arguments: [0.08, 0.16])
+    func thinTailSeparatesIntoDropsAndReturnsWithoutChangingVolume(flow: Double) {
+        let water = WaterModel(aspectRatio: 2.16)
+        var config = FluidConfiguration()
+        config.flow = flow
+        water.reset(configuration: config, start: true)
+        var maximumDetached = 0
+        for _ in 0..<600 {
+            water.advance(by: 1 / 60)
+            maximumDetached = max(maximumDetached, water.detachedDropCount)
+            #expect(water.detachedDropCount <= 3)
+            #expect(abs(water.jetFraction + water.splashFraction + water.landedFraction - water.fraction) < 1e-9)
+            #expect(water.streamVertices().count <= WaterModel.maximumStreamVertices)
+        }
+        #expect(maximumDetached > 0)
+        #expect(water.separatedTailArea > 0)
+        #expect(water.detachedDropCount == 0)
+        #expect(abs(water.landedFraction - config.fill) < 1e-9)
+        water.reset(configuration: config, start: false)
+        #expect(water.separatedTailArea == 0)
+        #expect(water.detachedDropCount == 0)
+    }
+
     @Test
     func resetClearsPoolAndFallingStream() {
         let water = WaterModel(aspectRatio: 2.16)
