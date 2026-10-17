@@ -37,6 +37,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     private var queue: (any MTLCommandQueue)?
     private var library: (any MTLLibrary)?
     private var renderPipeline: (any MTLRenderPipelineState)?
+    private var splashPipeline: (any MTLRenderPipelineState)?
     private var streamPipeline: (any MTLRenderPipelineState)?
     private var simulation: FluidSimulation?
     private var simulationAspect = 0.0
@@ -71,6 +72,8 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             descriptor.vertexFunction = library.makeFunction(name: "streamVertex")
             descriptor.fragmentFunction = library.makeFunction(name: "streamFragment")
             streamPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            descriptor.fragmentFunction = library.makeFunction(name: "splashFragment")
+            splashPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
             self.queue = queue
             self.library = library
         } catch {
@@ -84,7 +87,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         guard !pending, controls.error == nil,
-              let device = view.device, library != nil, let queue, let renderPipeline, let streamPipeline,
+              let device = view.device, library != nil, let queue, let renderPipeline, let streamPipeline, let splashPipeline,
               view.drawableSize.width > 0, view.drawableSize.height > 0,
               let drawable = view.currentDrawable,
               let pass = view.currentRenderPassDescriptor,
@@ -136,6 +139,11 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             encoder.setRenderPipelineState(renderPipeline)
             encoder.setFragmentBuffer(simulation.surfaceBuffer, offset: 0, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            if simulation.splashVertexCount > 0 {
+                encoder.setRenderPipelineState(splashPipeline)
+                encoder.setVertexBuffer(simulation.splashBuffer, offset: 0, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: simulation.splashVertexCount)
+            }
             encoder.endEncoding()
             command.present(drawable)
             pending = true

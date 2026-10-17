@@ -47,3 +47,12 @@ fragment half4 streamFragment(WaterRaster in [[stage_in]], constant WaterUniform
     float alpha = coverage * s.viewport.z;
     return half4(half3(color * alpha), half(alpha));
 }
+
+fragment half4 splashFragment(WaterRaster in [[stage_in]], constant WaterUniforms &s [[buffer(0)]]) {
+    float distance = length(in.uv);
+    float coverage = 1 - smoothstep(0.78f, 1.0f, distance);
+    float highlight = exp(-pow((in.uv.x + 0.35f) * 5, 2.0f));
+    float3 color = float3(0.06f, 0.61f, 0.84f) + highlight * 0.12f;
+    float alpha = coverage * s.viewport.z;
+    return half4(half3(color * alpha), half(alpha));
+}

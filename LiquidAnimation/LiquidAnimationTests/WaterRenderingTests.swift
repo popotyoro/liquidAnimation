@@ -39,11 +39,14 @@ struct WaterRenderingTests {
             var uniforms = WaterUniforms(viewport: SIMD4(Float(width), Float(height), 0.45,
                                                         Float(fluid.model.columnCount)))
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
-            for stream in [true, false] {
+            for layer in 0...2 {
+                let stream = layer == 0
+                let spray = layer == 2
+                if spray && fluid.splashVertexCount == 0 { continue }
                 if stream && fluid.streamVertexCount == 0 { continue }
                 let pipeline = MTLRenderPipelineDescriptor()
-                pipeline.vertexFunction = library.makeFunction(name: stream ? "streamVertex" : "waterVertex")
-                pipeline.fragmentFunction = library.makeFunction(name: stream ? "streamFragment" : "waterFragment")
+                pipeline.vertexFunction = library.makeFunction(name: (stream || spray) ? "streamVertex" : "waterVertex")
+                pipeline.fragmentFunction = library.makeFunction(name: spray ? "splashFragment" : (stream ? "streamFragment" : "waterFragment"))
                 let color = pipeline.colorAttachments[0]!
                 color.pixelFormat = .rgba8Unorm
                 color.isBlendingEnabled = true
@@ -52,7 +55,10 @@ struct WaterRenderingTests {
                 color.destinationRGBBlendFactor = .oneMinusSourceAlpha
                 color.destinationAlphaBlendFactor = .oneMinusSourceAlpha
                 encoder.setRenderPipelineState(try device.makeRenderPipelineState(descriptor: pipeline))
-                if stream {
+                if spray {
+                    encoder.setVertexBuffer(fluid.splashBuffer, offset: 0, index: 0)
+                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fluid.splashVertexCount)
+                } else if stream {
                     encoder.setVertexBuffer(fluid.streamBuffer, offset: 0, index: 0)
                     encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: fluid.streamVertexCount)
                 } else {

@@ -50,6 +50,37 @@ struct LiquidAnimationTests {
         #expect(water.surfaceRange < earlyRange * 0.1)
     }
 
+    @Test(arguments: [-65.0, 0.0, 65.0])
+    func sprayReturnsToPoolWithoutAddingWater(angle: Double) {
+        let water = WaterModel(aspectRatio: 2.16)
+        var config = FluidConfiguration()
+        config.angle = angle
+        config.flow = 0.16
+        water.reset(configuration: config, start: true)
+        var sawSpray = false
+        for _ in 0..<720 {
+            water.advance(by: 1 / 60)
+            sawSpray = sawSpray || water.splashCount > 0
+            #expect(water.splashCount <= WaterModel.maximumDrops)
+            #expect(abs(water.jetFraction + water.splashFraction + water.landedFraction - water.fraction) < 1e-9)
+            #expect(water.splashVertices().allSatisfy {
+                $0.position.x.isFinite && $0.position.y.isFinite
+            })
+        }
+        #expect(sawSpray)
+        #expect(water.splashCount == 0)
+        #expect(abs(water.landedFraction - 0.5) < 1e-9)
+        water.reset(configuration: config, start: true)
+        for _ in 0..<240 {
+            water.advance(by: 1 / 60)
+            if water.splashCount > 0 { break }
+        }
+        #expect(water.splashCount > 0)
+        water.reset(configuration: config, start: false)
+        #expect(water.splashVertices().isEmpty)
+        #expect(water.splashFraction == 0)
+    }
+
     @Test
     func resetClearsPoolAndFallingStream() {
         let water = WaterModel(aspectRatio: 2.16)
