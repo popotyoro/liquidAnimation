@@ -9,9 +9,17 @@ nonisolated struct WaterVertex: Sendable {
     var texture: SIMD2<Float> // 水流では横断方向、飛沫では楕円の局所座標として使う。
 }
 
+/// 気泡の局所座標と寿命による濃さ。Metal側と32バイトの配置を揃える。
+nonisolated struct BubbleVertex: Sendable {
+    var position: SIMD2<Float>
+    var texture: SIMD2<Float>
+    var appearance: SIMD4<Float>
+}
+
 /// 各描画パスで共用する定数。Metal側とのメモリ配置を揃える。
 nonisolated struct WaterUniforms: Sendable {
     var viewport: SIMD4<Float> // ピクセル幅・高さ、不透明度、水面の列数。
+    var detail: SIMD4<Float> = .zero // 着水中心x、圧力の強さ、物理時刻、容器の縦横比。
 }
 
 /// Metalの初期化・描画に失敗した理由を操作画面へ伝える。
@@ -55,6 +63,28 @@ final class WaterModel {
     var splashCount: Int { drops.count }
     var splashFraction: Double { drops.reduce(0) { $0 + $1.area } / capacity }
     var jetFraction: Double { parcels.reduce(0) { $0 + $1.area } / capacity }
+    // 気泡は空気を表す装飾。水深・運動量・投入量へは影響を与えない。
+    static let maximumBubbles = 128
+    private struct Bubble {
+        var position: SIMD2<Double>
+        var velocity: SIMD2<Double>
+        var radius: Double
+        var age: Double
+        var lifetime: Double
+        var phase: Double
+    }
+    private var bubbles: [Bubble] = []
+    private var lastBubbleTime = -1.0
+    private var bubbleSequence = 0
+    var bubbleCount: Int { bubbles.count }
+    var visualDetails: SIMD4<Float> {
+        let sum = impactPressure.reduce(0, +)
+        let center = sum > 1e-9 ? impactPressure.enumerated().reduce(0.0) {
+            $0 + (Double($1.offset) + 0.5) / Double(columnCount) * $1.element
+        } / sum : 0
+        return SIMD4(Float(center), Float((impactPressure.max() ?? 0) / (gravity * 0.06)),
+                     Float(time), Float(height / width))
+    }
     private var targetArea = 0.0
     private let gravity = 9.81
     private let inletSpeed = 1.6
@@ -134,6 +164,9 @@ final class WaterModel {
         drops.removeAll(keepingCapacity: true)
         lastSplashTime = -1
         splashSequence = 0
+        bubbles.removeAll(keepingCapacity: true)
+        lastBubbleTime = -1
+        bubbleSequence = 0
         for i in depths.indices {
             depths[i] = 0
             momentum[i] = 0
@@ -164,6 +197,7 @@ final class WaterModel {
             }
             // 飛沫を戻す → 水流を着水させる → 圧力を更新 → 水面を進める、の順で処理する。
             advanceDrops(dt: dt)
+            advanceBubbles(dt: dt)
             for i in impactImpulse.indices { impactImpulse[i] = 0 }
             depositArrivals()
             updateImpactPressure(dt: dt)
@@ -197,6 +231,10 @@ final class WaterModel {
                 continue
             }
             let impactSpeed = inletSpeed * cos(angle) + gravity * age
+            if collisionDepths[column] > 0.035, time - lastBubbleTime >= 0.045,
+               emissionRate(at: parcel.time) > nominalRate * 0.05 {
+                spawnBubbles(at: point.x, surface: height - collisionDepths[column], impactSpeed: impactSpeed)
+            }
             // 着水量の一部だけを飛沫へ回し、水を増やさない。
             // 発生間隔・同時数・上昇速度を制限して、負荷と過剰な跳ね返りを抑える。
             var splashArea = 0.0
@@ -283,6 +321,66 @@ final class WaterModel {
             }
         }
         drops = survivors
+    }
+
+    /// 着水点から空気が巻き込まれる様子を、最大2個ずつの気泡で近似する。
+    private func spawnBubbles(at x: Double, surface: Double, impactSpeed: Double) {
+        guard bubbles.count + 2 <= Self.maximumBubbles else { return }
+        lastBubbleTime = time
+        bubbleSequence += 1
+        for side in [-1.0, 1.0] {
+            let phase = Double(bubbleSequence) * 2.399 + side
+            let variation = 0.5 + 0.5 * sin(phase)
+            let radius = 0.002 + 0.004 * variation
+            bubbles.append(Bubble(
+                position: SIMD2(min(width - radius, max(radius, x + side * (0.005 + variation * 0.012))),
+                                min(height - radius, surface + 0.012 + radius * 2)),
+                velocity: SIMD2(side * (0.03 + variation * 0.08), min(0.45, impactSpeed * 0.10)),
+                radius: radius, age: 0, lifetime: 1.8 + variation, phase: phase))
+        }
+    }
+
+    /// 最初は下へ巻き込まれ、抵抗と浮力の近似で上昇する。合体・分裂・水への反作用は解かない。
+    private func advanceBubbles(dt: Double) {
+        var survivors: [Bubble] = []
+        survivors.reserveCapacity(bubbles.count)
+        for var bubble in bubbles {
+            bubble.age += dt
+            guard bubble.age < bubble.lifetime else { continue }
+            let column = min(columnCount - 1, max(0, Int(bubble.position.x / dx)))
+            guard depths[column] > bubble.radius * 3 else { continue }
+            let waterSpeed = depths[column] > dryDepth ? momentum[column] / depths[column] : 0
+            let target = SIMD2(waterSpeed * 0.15 + sin(bubble.age * 8 + bubble.phase) * 0.035,
+                               -0.10 - bubble.radius * 14)
+            bubble.velocity += (target - bubble.velocity) * (1 - exp(-4 * dt))
+            bubble.position += bubble.velocity * dt
+            bubble.position.x = min(width - bubble.radius, max(bubble.radius, bubble.position.x))
+            let destination = min(columnCount - 1, max(0, Int(bubble.position.x / dx)))
+            // 浮上して水面へ触れた気泡は消す。水の量は変わらない。
+            guard bubble.position.y - bubble.radius > height - depths[destination],
+                  bubble.position.y + bubble.radius < height else { continue }
+            survivors.append(bubble)
+        }
+        bubbles = survivors
+    }
+
+    /// 気泡を四角形へ展開する。輪郭と小さな反射光はMetal側で描く。
+    func bubbleVertices() -> [BubbleVertex] {
+        let corners: [SIMD2<Double>] = [SIMD2(-1,-1), SIMD2(1,-1), SIMD2(-1,1),
+                                      SIMD2(-1,1), SIMD2(1,-1), SIMD2(1,1)]
+        var vertices: [BubbleVertex] = []
+        vertices.reserveCapacity(bubbles.count * 6)
+        for bubble in bubbles {
+            let fade = min(1, bubble.age / 0.10, (bubble.lifetime - bubble.age) / 0.3)
+            for corner in corners {
+                let point = bubble.position + corner * bubble.radius
+                vertices.append(BubbleVertex(
+                    position: SIMD2(Float(point.x / width), Float(1 - point.y / height)),
+                    texture: SIMD2(Float(corner.x), Float(-corner.y)),
+                    appearance: SIMD4(Float(fade), 0, 0, 0)))
+            }
+        }
+        return vertices
     }
 
     /// 飛沫を速度方向に伸ばした楕円の四角形メッシュへ変換する。
@@ -467,6 +565,8 @@ final class FluidSimulation {
     let surfaceBuffer: any MTLBuffer
     let streamBuffer: any MTLBuffer
     let splashBuffer: any MTLBuffer
+    let bubbleBuffer: any MTLBuffer
+    private(set) var bubbleVertexCount = 0
     private(set) var splashVertexCount = 0
     private(set) var streamVertexCount = 0
 
@@ -477,12 +577,15 @@ final class FluidSimulation {
               let stream = device.makeBuffer(length: WaterModel.maximumStreamVertices * MemoryLayout<WaterVertex>.stride,
                                              options: .storageModeShared),
               let splash = device.makeBuffer(length: WaterModel.maximumDrops * 6 * MemoryLayout<WaterVertex>.stride,
-                                             options: .storageModeShared) else {
+                                             options: .storageModeShared),
+              let bubbles = device.makeBuffer(length: WaterModel.maximumBubbles * 6 * MemoryLayout<BubbleVertex>.stride,
+                                              options: .storageModeShared) else {
             throw FluidError.unavailable("水面の描画メモリを確保できませんでした。")
         }
         surfaceBuffer = surface
         streamBuffer = stream
         splashBuffer = splash
+        bubbleBuffer = bubbles
     }
 
     /// CPU上の最新状態を共有バッファへ転送する。
@@ -490,6 +593,13 @@ final class FluidSimulation {
     func uploadSurface() {
         let heights = surfaceBuffer.contents().bindMemory(to: Float.self, capacity: model.columnCount)
         for i in model.depths.indices { heights[i] = Float(model.depths[i] / model.height) }
+        let bubbles = model.bubbleVertices()
+        bubbleVertexCount = bubbles.count
+        bubbles.withUnsafeBytes { bytes in
+            if let base = bytes.baseAddress, !bytes.isEmpty {
+                memcpy(bubbleBuffer.contents(), base, bytes.count)
+            }
+        }
         let spray = model.splashVertices()
         splashVertexCount = spray.count
         spray.withUnsafeBytes { bytes in

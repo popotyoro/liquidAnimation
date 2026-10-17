@@ -43,15 +43,20 @@ struct WaterRenderingTests {
             let encoder = try #require(command.makeRenderCommandEncoder(descriptor: pass))
             var uniforms = WaterUniforms(viewport: SIMD4(Float(width), Float(height), 0.45,
                                                         Float(fluid.model.columnCount)))
+            uniforms.detail = fluid.model.visualDetails
+            if frame == 120 { #expect(fluid.model.bubbleCount > 0) }
+            if frame == 480 { #expect(fluid.model.bubbleCount == 0) }
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
-            for layer in 0...2 {
+            for layer in 0...3 {
                 let stream = layer == 0
-                let spray = layer == 2
+                let bubble = layer == 2
+                let spray = layer == 3
+                if bubble && fluid.bubbleVertexCount == 0 { continue }
                 if spray && fluid.splashVertexCount == 0 { continue }
                 if stream && fluid.streamVertexCount == 0 { continue }
                 let pipeline = MTLRenderPipelineDescriptor()
-                pipeline.vertexFunction = library.makeFunction(name: (stream || spray) ? "streamVertex" : "waterVertex")
-                pipeline.fragmentFunction = library.makeFunction(name: spray ? "splashFragment" : (stream ? "streamFragment" : "waterFragment"))
+                pipeline.vertexFunction = library.makeFunction(name: bubble ? "bubbleVertex" : ((stream || spray) ? "streamVertex" : "waterVertex"))
+                pipeline.fragmentFunction = library.makeFunction(name: bubble ? "bubbleFragment" : (spray ? "splashFragment" : (stream ? "streamFragment" : "waterFragment")))
                 let color = pipeline.colorAttachments[0]!
                 color.pixelFormat = .rgba8Unorm
                 color.isBlendingEnabled = true
@@ -60,7 +65,10 @@ struct WaterRenderingTests {
                 color.destinationRGBBlendFactor = .oneMinusSourceAlpha
                 color.destinationAlphaBlendFactor = .oneMinusSourceAlpha
                 encoder.setRenderPipelineState(try device.makeRenderPipelineState(descriptor: pipeline))
-                if spray {
+                if bubble {
+                    encoder.setVertexBuffer(fluid.bubbleBuffer, offset: 0, index: 0)
+                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fluid.bubbleVertexCount)
+                } else if spray {
                     encoder.setVertexBuffer(fluid.splashBuffer, offset: 0, index: 0)
                     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fluid.splashVertexCount)
                 } else if stream {

@@ -163,6 +163,34 @@ struct LiquidAnimationTests {
     }
 
     @Test
+    func bubblesRemainBoundedDisappearAndDoNotChangeWaterVolume() {
+        let water = WaterModel(aspectRatio: 2.16)
+        var config = FluidConfiguration()
+        config.flow = 0.16
+        water.reset(configuration: config, start: true)
+        var maximumCount = 0
+        for _ in 0..<480 {
+            water.advance(by: 1 / 60)
+            maximumCount = max(maximumCount, water.bubbleCount)
+            #expect(water.bubbleCount <= WaterModel.maximumBubbles)
+            #expect(abs(water.jetFraction + water.splashFraction + water.landedFraction - water.fraction) < 1e-9)
+            #expect(water.bubbleVertices().allSatisfy {
+                $0.position.x.isFinite && $0.position.y.isFinite &&
+                $0.appearance.x >= 0 && $0.appearance.x <= 1
+            })
+        }
+        #expect(maximumCount > 0)
+        #expect(water.bubbleCount == 0)
+        #expect(abs(water.landedFraction - 0.5) < 1e-9)
+        water.reset(configuration: config, start: true)
+        for _ in 0..<120 { water.advance(by: 1 / 60) }
+        #expect(water.bubbleCount > 0)
+        water.reset(configuration: config, start: false)
+        #expect(water.bubbleVertices().isEmpty)
+        #expect(MemoryLayout<BubbleVertex>.stride == 32)
+    }
+
+    @Test
     func resetClearsPoolAndFallingStream() {
         let water = WaterModel(aspectRatio: 2.16)
         water.reset(configuration: FluidConfiguration(), start: true)

@@ -44,6 +44,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     private var queue: (any MTLCommandQueue)?
     private var library: (any MTLLibrary)?
     private var renderPipeline: (any MTLRenderPipelineState)?
+    private var bubblePipeline: (any MTLRenderPipelineState)?
     private var splashPipeline: (any MTLRenderPipelineState)?
     private var streamPipeline: (any MTLRenderPipelineState)?
     private var simulation: FluidSimulation?
@@ -59,7 +60,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
 
     init(controls: FluidControls) { self.controls = controls }
 
-    /// 初期化時に3種類の描画パイプラインを作り、毎フレームの生成を避ける。
+    /// 初期化時に4種類の描画パイプラインを作り、毎フレームの生成を避ける。
     func attach(to view: MTKView) {
         do {
             guard let device = view.device, let queue = device.makeCommandQueue(),
@@ -83,6 +84,9 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             streamPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
             descriptor.fragmentFunction = library.makeFunction(name: "splashFragment")
             splashPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            descriptor.vertexFunction = library.makeFunction(name: "bubbleVertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "bubbleFragment")
+            bubblePipeline = try device.makeRenderPipelineState(descriptor: descriptor)
             self.queue = queue
             self.library = library
         } catch {
@@ -98,7 +102,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     /// GPUの前フレームが完了し、描画先を確保できたときだけ次のフレームを処理する。
     func draw(in view: MTKView) {
         guard !pending, controls.error == nil,
-              let device = view.device, library != nil, let queue, let renderPipeline, let streamPipeline, let splashPipeline,
+              let device = view.device, library != nil, let queue, let renderPipeline, let streamPipeline, let splashPipeline, let bubblePipeline,
               view.drawableSize.width > 0, view.drawableSize.height > 0,
               let drawable = view.currentDrawable,
               let pass = view.currentRenderPassDescriptor,
@@ -145,8 +149,9 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             var uniforms = WaterUniforms(viewport: SIMD4(
                 Float(view.drawableSize.width), Float(view.drawableSize.height),
                 Float(controls.configuration.sanitized.opacity), Float(simulation.model.columnCount)))
+            uniforms.detail = simulation.model.visualDetails
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
-            // 水流 → 容器内の水 → 飛沫の順。水面より下の水流は容器内の水で覆う。
+            // 水流 → 容器内の水 → 気泡 → 飛沫の順。水面より下の水流は容器内の水で覆う。
             if simulation.streamVertexCount > 0 {
                 encoder.setRenderPipelineState(streamPipeline)
                 encoder.setVertexBuffer(simulation.streamBuffer, offset: 0, index: 0)
@@ -155,6 +160,11 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             encoder.setRenderPipelineState(renderPipeline)
             encoder.setFragmentBuffer(simulation.surfaceBuffer, offset: 0, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            if simulation.bubbleVertexCount > 0 {
+                encoder.setRenderPipelineState(bubblePipeline)
+                encoder.setVertexBuffer(simulation.bubbleBuffer, offset: 0, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: simulation.bubbleVertexCount)
+            }
             if simulation.splashVertexCount > 0 {
                 encoder.setRenderPipelineState(splashPipeline)
                 encoder.setVertexBuffer(simulation.splashBuffer, offset: 0, index: 0)
