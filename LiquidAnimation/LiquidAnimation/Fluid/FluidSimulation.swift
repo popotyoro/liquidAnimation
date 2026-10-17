@@ -362,8 +362,8 @@ final class WaterModel {
         }
     }
 
-    // 基本97断面 + 増減区間の最大24断面。それぞれ左右の2頂点を持つ。
-    static let maximumStreamVertices = 242
+    // 基本97断面 + 増減区間の最大24断面 + 先端の最大17断面。各断面は左右2頂点。
+    static let maximumStreamVertices = 276
 
     /// 投入時刻ごとの流量から水流の帯を作る。物理モデルの水量は変更しない。
     func streamVertices() -> [WaterVertex] {
@@ -395,6 +395,21 @@ final class WaterModel {
                 if age > youngest && age < oldest { ages.append(age) }
             }
         }
+        // 開始時の薄い水を先端の小さなふくらみとして描き、長い針状の輪郭を避ける。
+        // 初期に投入した量から大きさを決めるが、これは表面張力を解かない描画上の近似。
+        // 最初の水が着水した後は適用せず、既存の着水点の描画へ引き継ぐ。
+        let freeHead = landedArea == 0 && !nearSurface
+        let headSpeed = simd_length(SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * oldest))
+        let initialArea = cumulativeEmission(at: min(time * 0.5, rampDuration * 0.5))
+        let headRadius = freeHead ? min(0.02, sqrt(initialArea / .pi)) : 0
+        let headDuration = min(max(0, oldest - max(0, youngest)), 2 * headRadius / headSpeed)
+        if headDuration > 0 {
+            for i in 0...16 {
+                // 角度に等間隔で点を置き、丸い先端近くにも十分な頂点を確保する。
+                let theta = Double(i) / 16 * .pi
+                ages.append(oldest - headDuration * (1 + cos(theta)) / 2)
+            }
+        }
         ages.sort()
         for (index, age) in ages.enumerated() {
             // 現在の流量を帯全体に適用せず、その水が投入された時刻の流量を使う。
@@ -410,7 +425,21 @@ final class WaterModel {
             let speed = simd_length(velocity)
             let normal = SIMD2(velocity.y, -velocity.x) / speed
             // 断面の幅はQ/速度。加速すると細くなる帯に、見た目の太さの変化を重ねる。
-            let halfWidth = areaRate / (2 * speed) * (1 + 0.22 * growth * sin(phase * 1.3))
+            var halfWidth = areaRate / (2 * speed) * (1 + 0.22 * growth * sin(phase * 1.3))
+            if headDuration > 0 {
+                // 丸みだけを先端に足すと「針の先の玉」に見えるため、初期の細い部分もつなぐ。
+                // 増流区間の後半で補正を滑らかに0へ戻し、通常の流量に基づく幅へ接続する。
+                let emittedAt = min(time, time - age)
+                let blend = min(1, max(0, (emittedAt - rampDuration / 2) / (rampDuration / 2)))
+                let neck = 1 - blend * blend * (3 - 2 * blend)
+                halfWidth = max(halfWidth, headRadius * neck)
+            }
+            if headDuration > 0, age >= oldest - headDuration {
+                let progress = min(1, max(0, (age - (oldest - headDuration)) / headDuration))
+                let roundWidth = headRadius * sqrt(max(0, 1 - pow(2 * progress - 1, 2)))
+                // ふくらみの後半を楕円の輪郭で閉じ、最後の断面は幅0にする。
+                halfWidth = progress >= 0.5 ? roundWidth : max(halfWidth, roundWidth)
+            }
             if !onWall { point += normal * wobble }
             for side in [-1.0, 1.0] {
                 let edge = point + side * halfWidth * normal
