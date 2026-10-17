@@ -2,8 +2,37 @@
 import MetalKit
 import SwiftUI
 
+extension View {
+    /// 適用先の大きさに合わせて液体を重ねる。操作と注水設定はcontrolsで管理する。
+    ///
+    /// - Parameters:
+    ///   - controls: 呼び出し側で保持する操作状態。Viewの更新ごとに作り直さないこと。
+    ///   - ignoresSafeArea: trueなら液体レイヤーだけをセーフエリアまで広げる。既定はfalse。
+    ///
+    /// 液体はタッチを遮らず、アクセシビリティの読み上げ対象にも含めない。
+    /// 適用先のレイアウトサイズは変更しない。
+    func liquidOverlay(controls: FluidControls, ignoresSafeArea: Bool = false) -> some View {
+        modifier(LiquidOverlayModifier(controls: controls, ignoresSafeArea: ignoresSafeArea))
+    }
+}
+
+/// 液体レイヤーの配置・タッチ透過・アクセシビリティ設定をまとめる。
+private struct LiquidOverlayModifier: ViewModifier {
+    let controls: FluidControls
+    let ignoresSafeArea: Bool
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            LiquidOverlay(controls: controls)
+                .ignoresSafeArea(.all, edges: ignoresSafeArea ? .all : [])
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 /// 背景の内容を読み取らず、任意の長方形領域へ水を重ねる。タッチは背景へ通す。
-struct LiquidOverlay: UIViewRepresentable {
+private struct LiquidOverlay: UIViewRepresentable {
     let controls: FluidControls
     @Environment(\.scenePhase) private var scenePhase
 

@@ -5,13 +5,8 @@ struct ContentView: View {
     @State private var showsSettings = false
 
     var body: some View {
-        ZStack {
-            DemoBackground()
-            LiquidOverlay(controls: controls)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
+        DemoBackground()
+        .liquidOverlay(controls: controls, ignoresSafeArea: true)
         .overlay(alignment: .bottom) {
             controlBar.padding(.horizontal).padding(.bottom, 8)
         }

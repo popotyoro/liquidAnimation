@@ -1,6 +1,6 @@
 # 液体注入アニメーション仕様書
 
-最終更新: 2026-10-17。現在の作業ツリーにある実装を対象とする。今後の候補は[将来対応リスト](future-features.md)を参照。
+最終更新: 2026-10-18。現在の作業ツリーにある実装を対象とする。今後の候補は[将来対応リスト](future-features.md)を参照。
 
 ## 目的と表示
 
@@ -42,6 +42,23 @@ A_{pool}=\int_0^W h(x)\,dx
 「注ぐ」で空の状態から指定量まで注ぐ。流量設定は最大流量を表し、開始・終了時は滑らかに増減する。一時停止・再開・空に戻す操作を用意する。不透明度は即時反映し、それ以外の設定は次の注水から適用する。注水終了後も水面の計算を続ける。画面サイズが変わった場合は空に戻す。
 
 試作画面には透過を確認する文字・図形・ボタンを配置する。操作パネルを重ねても液体の描画領域を縮めない。
+
+## SwiftUIからの利用
+
+任意のViewへ `.liquidOverlay(controls:ignoresSafeArea:)` を適用する。操作状態は呼び出し側が保持し、再描画のたびに作り直さない。
+
+```swift
+@State private var controls = FluidControls()
+
+var body: some View {
+    DemoBackground()
+        .liquidOverlay(controls: controls, ignoresSafeArea: true)
+}
+```
+
+`ignoresSafeArea` の既定値は `false`。通常は適用先の領域に重ね、`true`なら液体レイヤーだけをセーフエリアまで広げる。背景のレイアウトサイズは変更しない。デモでは画面上端から注ぐため `true` を指定する。
+
+`View`拡張は内部の`LiquidOverlayModifier: ViewModifier`を呼び出す入口とする。重ね合わせ、セーフエリア、タッチの透過、アクセシビリティからの除外はこのmodifier内で設定する。`LiquidOverlay`はファイル内の実装とし、利用側での`ZStack`や`.overlay`の指定は不要。現在はアプリ内のAPIであり、別パッケージ向けの`public`宣言は行っていない。
 
 ## 落下水流と浅水モデルを組み合わせる
 
