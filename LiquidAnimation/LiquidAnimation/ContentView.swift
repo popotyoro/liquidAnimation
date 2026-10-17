@@ -12,7 +12,7 @@ struct ContentView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
-        .safeAreaInset(edge: .bottom) {
+        .overlay(alignment: .bottom) {
             controlBar.padding(.horizontal).padding(.bottom, 8)
         }
         .sheet(isPresented: $showsSettings) {
@@ -105,6 +105,7 @@ private struct DemoBackground: View {
             }
             .padding(24).padding(.top, 12)
         }
+        .safeAreaPadding(.bottom, 128)
         .background(Color(uiColor: .systemGroupedBackground))
     }
 }
@@ -135,6 +136,7 @@ private struct FluidSettingsView: View {
                 Section("計測") {
                     LabeledContent("描画頻度", value: String(format: "%.0f fps", controls.framesPerSecond))
                     LabeledContent("GPU 時間", value: String(format: "%.1f ms", controls.gpuMilliseconds))
+                    LabeledContent("物理計算（CPU）", value: String(format: "%.1f ms", controls.simulationMilliseconds))
                     Text("60fps は目標値です。性能の判断には実機での測定が必要です。")
                         .font(.caption).foregroundStyle(.secondary)
                 }

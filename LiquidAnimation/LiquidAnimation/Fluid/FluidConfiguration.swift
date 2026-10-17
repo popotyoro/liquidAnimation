@@ -31,6 +31,7 @@ final class FluidControls {
     var insertedFraction = 0.0
     var framesPerSecond = 0.0
     var gpuMilliseconds = 0.0
+    var simulationMilliseconds = 0.0
 
     func pour() {
         isPaused = false

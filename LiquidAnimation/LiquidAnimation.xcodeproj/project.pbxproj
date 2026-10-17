@@ -10,6 +10,7 @@
 		EA41801D308399610015D799 /* LiquidAnimation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiquidAnimation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EAB9541930839FE9004A7FEE /* liquid-animation-spec.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "liquid-animation-spec.md"; sourceTree = "<group>"; };
 		EAB9541A3083A00F004A7FEE /* future-features.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "future-features.md"; sourceTree = "<group>"; };
+		EAB9541F3083A88D004A7FEE /* LiquidAnimationTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiquidAnimationTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -18,10 +19,20 @@
 			path = LiquidAnimation;
 			sourceTree = "<group>";
 		};
+		EAB954203083A88D004A7FEE /* LiquidAnimationTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LiquidAnimationTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		EA41801A308399610015D799 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		EAB9541C3083A88D004A7FEE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
@@ -33,6 +44,7 @@
 			isa = PBXGroup;
 			children = (
 				EA41801F308399610015D799 /* LiquidAnimation */,
+				EAB954203083A88D004A7FEE /* LiquidAnimationTests */,
 				EA41801E308399610015D799 /* Products */,
 				EAB9541830839FCF004A7FEE /* Documentation */,
 			);
@@ -42,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				EA41801D308399610015D799 /* LiquidAnimation.app */,
+				EAB9541F3083A88D004A7FEE /* LiquidAnimationTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -76,6 +89,24 @@
 			productReference = EA41801D308399610015D799 /* LiquidAnimation.app */;
 			productType = "com.apple.product-type.application";
 		};
+		EAB9541E3083A88D004A7FEE /* LiquidAnimationTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EAB954233083A88D004A7FEE /* Build configuration list for PBXNativeTarget "LiquidAnimationTests" */;
+			buildPhases = (
+				EAB9541B3083A88D004A7FEE /* Sources */,
+				EAB9541C3083A88D004A7FEE /* Frameworks */,
+				EAB9541D3083A88D004A7FEE /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				EAB954203083A88D004A7FEE /* LiquidAnimationTests */,
+			);
+			name = LiquidAnimationTests;
+			productName = LiquidAnimationTests;
+			productReference = EAB9541F3083A88D004A7FEE /* LiquidAnimationTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -87,6 +118,9 @@
 				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					EA41801C308399610015D799 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+					EAB9541E3083A88D004A7FEE = {
 						CreatedOnToolsVersion = 27.1;
 					};
 				};
@@ -106,6 +140,7 @@
 			projectRoot = "";
 			targets = (
 				EA41801C308399610015D799 /* LiquidAnimation */,
+				EAB9541E3083A88D004A7FEE /* LiquidAnimationTests */,
 			);
 		};
 /* End PBXProject section */
@@ -116,10 +151,20 @@
 			files = (
 			);
 		};
+		EAB9541D3083A88D004A7FEE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		EA418019308399610015D799 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		EAB9541B3083A88D004A7FEE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -337,6 +382,64 @@
 			};
 			name = Release;
 		};
+		EAB954243083A88D004A7FEE /* Debug configuration for PBXNativeTarget "LiquidAnimationTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)/LiquidAnimation.app/LiquidAnimation.debug.dylib",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tagayasu.LiquidAnimationTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LiquidAnimation.app/LiquidAnimation";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		EAB954253083A88D004A7FEE /* Release configuration for PBXNativeTarget "LiquidAnimationTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)/LiquidAnimation.app/LiquidAnimation.debug.dylib",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tagayasu.LiquidAnimationTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LiquidAnimation.app/LiquidAnimation";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -353,6 +456,14 @@
 			buildConfigurations = (
 				EA418029308399630015D799 /* Debug configuration for PBXNativeTarget "LiquidAnimation" */,
 				EA41802A308399630015D799 /* Release configuration for PBXNativeTarget "LiquidAnimation" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		EAB954233083A88D004A7FEE /* Build configuration list for PBXNativeTarget "LiquidAnimationTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EAB954243083A88D004A7FEE /* Debug configuration for PBXNativeTarget "LiquidAnimationTests" */,
+				EAB954253083A88D004A7FEE /* Release configuration for PBXNativeTarget "LiquidAnimationTests" */,
 			);
 			defaultConfigurationName = Release;
 		};

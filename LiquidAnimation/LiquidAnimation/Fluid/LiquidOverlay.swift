@@ -38,7 +38,9 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     private var queue: (any MTLCommandQueue)?
     private var library: (any MTLLibrary)?
     private var renderPipeline: (any MTLRenderPipelineState)?
+    private var streamPipeline: (any MTLRenderPipelineState)?
     private var simulation: FluidSimulation?
+    private var simulationAspect = 0.0
     private var pending = false
     private var previousTime: CFTimeInterval?
     private var reportTime = CACurrentMediaTime()
@@ -55,8 +57,8 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
                 throw FluidError.unavailable("この環境では Metal を初期化できませんでした。")
             }
             let descriptor = MTLRenderPipelineDescriptor()
-            descriptor.vertexFunction = library.makeFunction(name: "fluidVertex")
-            descriptor.fragmentFunction = library.makeFunction(name: "fluidFragment")
+            descriptor.vertexFunction = library.makeFunction(name: "waterVertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "waterFragment")
             let attachment = descriptor.colorAttachments[0]!
             attachment.pixelFormat = view.colorPixelFormat
             attachment.isBlendingEnabled = true
@@ -65,6 +67,9 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             attachment.sourceAlphaBlendFactor = .one
             attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
             renderPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            descriptor.vertexFunction = library.makeFunction(name: "streamVertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "streamFragment")
+            streamPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
             self.queue = queue
             self.library = library
         } catch {
@@ -78,17 +83,17 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         guard !pending, controls.error == nil,
-              let device = view.device, let library, let queue, let renderPipeline,
+              let device = view.device, library != nil, let queue, let renderPipeline, let streamPipeline,
               view.drawableSize.width > 0, view.drawableSize.height > 0,
               let drawable = view.currentDrawable,
               let pass = view.currentRenderPassDescriptor,
               let command = queue.makeCommandBuffer() else { return }
         do {
             let aspect = view.drawableSize.height / view.drawableSize.width
-            let expectedHeight = min(256, max(32, Int((64 * aspect).rounded())))
-            if simulation == nil || simulation?.ny != expectedHeight {
+            if simulation == nil || abs(simulationAspect - aspect) > 0.01 {
                 let resizing = simulation != nil
-                simulation = try FluidSimulation(device: device, library: library, aspectRatio: aspect)
+                simulation = try FluidSimulation(device: device, aspectRatio: aspect)
+                simulationAspect = aspect
                 if resizing {
                     controls.reset()
                     controls.status = "画面サイズが変わったため空に戻しました"
@@ -98,35 +103,43 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             }
             guard let simulation else { return }
             if controls.resetID != lastReset {
-                simulation.reset(configuration: controls.configuration, start: false)
+                simulation.model.reset(configuration: controls.configuration, start: false)
                 lastReset = controls.resetID
                 lastRestart = controls.restartID
             }
             if controls.restartID != lastRestart {
-                simulation.reset(configuration: controls.configuration, start: true)
+                simulation.model.reset(configuration: controls.configuration, start: true)
                 lastRestart = controls.restartID
             }
             let now = CACurrentMediaTime()
             let dt = Float(min(max(now - (previousTime ?? (now - 1 / 60)), 0), 1 / 60))
             previousTime = now
-            simulation.diagnostics.contents().storeBytes(of: UInt32(0), as: UInt32.self)
-            try simulation.encodeFrame(commandBuffer: command, deltaTime: dt,
-                                       opacity: controls.configuration.sanitized.opacity,
-                                       advance: !controls.isPaused &&
-                                        (simulation.particleCount > 0 || simulation.isPouring))
+            let simulationStart = CACurrentMediaTime()
+            if !controls.isPaused && (simulation.model.hasWater || simulation.model.isPouring) {
+                simulation.model.advance(by: Double(dt))
+            }
+            simulation.uploadSurface()
+            let simulationMS = (CACurrentMediaTime() - simulationStart) * 1_000
             guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else {
                 throw FluidError.unavailable("液体の描画コマンドを作成できませんでした。")
             }
+            var uniforms = WaterUniforms(viewport: SIMD4(
+                Float(view.drawableSize.width), Float(view.drawableSize.height),
+                Float(controls.configuration.sanitized.opacity), Float(simulation.model.columnCount)))
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
+            if simulation.streamVertexCount > 0 {
+                encoder.setRenderPipelineState(streamPipeline)
+                encoder.setVertexBuffer(simulation.streamBuffer, offset: 0, index: 0)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: simulation.streamVertexCount)
+            }
             encoder.setRenderPipelineState(renderPipeline)
-            encoder.setFragmentTexture(simulation.surface, index: 0)
-            var uniforms = simulation.uniforms
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<FluidUniforms>.stride, index: 0)
+            encoder.setFragmentBuffer(simulation.surfaceBuffer, offset: 0, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
             command.present(drawable)
             pending = true
-            let fraction = simulation.fraction
-            let pouring = simulation.isPouring
+            let fraction = simulation.model.fraction
+            let pouring = simulation.model.isPouring
             command.addCompletedHandler { [weak self] completed in
                 let gpuMS = max(0, completed.gpuEndTime - completed.gpuStartTime) * 1_000
                 let message = completed.error?.localizedDescription
@@ -134,15 +147,13 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
                     guard let self else { return }
                     self.pending = false
                     if let message { self.controls.error = message }
-                    if simulation.diagnostics.contents().load(as: UInt32.self) > 0 {
-                        self.controls.error = "液体が一か所に集中し、計算の上限を超えました。リセットしてください。"
-                    }
                     self.reportFrames += 1
                     let reportNow = CACurrentMediaTime()
                     let interval = reportNow - self.reportTime
                     if interval >= 0.5 {
                         self.controls.framesPerSecond = Double(self.reportFrames) / interval
                         self.controls.gpuMilliseconds = gpuMS
+                        self.controls.simulationMilliseconds = simulationMS
                         self.controls.insertedFraction = fraction
                         if !self.controls.isPaused {
                             self.controls.status = pouring ? "注水中" :

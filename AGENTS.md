@@ -6,7 +6,7 @@ SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iO
 
 - `LiquidAnimation/LiquidAnimation.xcodeproj`：Xcode プロジェクト。
 - `LiquidAnimation/LiquidAnimation/ContentView.swift`：試作画面と設定 UI。
-- `LiquidAnimation/LiquidAnimation/Fluid/`：設定モデル、APIC ソルバー、Metal の計算・描画、SwiftUI への組み込み。
+- `LiquidAnimation/LiquidAnimation/Fluid/`：設定モデル、浅水ソルバー、Metal の計算・描画、SwiftUI への組み込み。
 - `LiquidAnimation/LiquidAnimation/Assets.xcassets`：色とアプリアイコン。
 
 ## ビルド・実行は Xcode MCP を使う
@@ -23,17 +23,17 @@ SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iO
 
 インデントはスペース4つ。型は `UpperCamelCase`、変数・関数は `lowerCamelCase`、ファイル名は主な型に合わせる。現時点で専用のフォーマッターやリンターは導入していない。
 
-SwiftUI は設定と操作、Metal は物理計算と描画を担当する。毎フレームの粒子データを SwiftUI の状態へ流さず、表示する計測値の更新頻度を抑える。Swift と Metal で共有する構造体は、フィールド順序・型・メモリアラインメントを一致させる。
+SwiftUI は設定と操作、CPU は浅水モデルと液量の計算、Metal は水面と水流の描画を担当する。毎フレームの粒子データを SwiftUI の状態へ流さず、表示する計測値の更新頻度を抑える。Swift と Metal で共有する構造体は、フィールド順序・型・メモリアラインメントを一致させる。
 
 ## 物理計算と検証
 
 液量は水流・飛沫を含めた投入総量で管理する。透明なレイヤーは背景の描画内容に依存せず、タッチを遮らない。時間刻み、境界条件、数値的な減衰などの近似はコードと仕様書に残す。
 
-独立したテストターゲットとカバレッジ基準は未設定。変更時は MCP のビルド確認に加え、0%・50%・100% の投入量、粒子の漏れ、NaN、圧力投影、一時停止・リセットを確認する。必要に応じて `RunCodeSnippet` を使う。テストターゲット導入後は `RunAllTests` または `RunSomeTests` を使い、テスト名に条件と期待結果を含める。60fps の達成は実機で測定し、シミュレータの結果と区別する。
+Swift Testing の `LiquidAnimationTests` ターゲットを使用する。カバレッジ基準は未設定。変更時は MCP のビルド確認に加え、0%・50%・100% の投入量、液量の保存、非有限値、波の減衰、一時停止・リセットを確認する。`LiquidAnimationTests` スキームで `RunAllTests` または `RunSomeTests` を使い、テスト名に条件と期待結果を含める。実行先は iPhone 18 Pro とし、iPhone Duo およびDuoを選ぶ可能性があるプレビュー経由の検証は使用しない。60fps の達成は実機で測定し、シミュレータの結果と区別する。
 
 ## コミットとプルリクエスト
 
-まだコミット履歴がなく、既存の命名規約はない。新しいコミットは変更目的が分かる短い命令形とし、例として `Add APIC pressure projection` を使う。PR には目的、変更内容、MCP での確認結果、未検証事項を記載する。見た目の変更には画像または動画を添え、関連 Issue があればリンクする。
+既存のコミットは `Add SwiftUI liquid simulation prototype` のような短い命令形。新しいコミットも変更目的が分かる表現にする。PR には目的、変更内容、MCP での確認結果、未検証事項を記載する。見た目の変更には画像または動画を添え、関連 Issue があればリンクする。
 
 ## エージェントの作業範囲
 
