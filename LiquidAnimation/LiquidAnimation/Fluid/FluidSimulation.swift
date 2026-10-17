@@ -57,6 +57,30 @@ final class WaterModel {
         var area: Double
     }
 
+    private var nominalRate: Double { configuration.flow * capacity }
+    private var rampDuration: Double { min(0.25, targetArea / nominalRate) }
+    var pourDuration: Double { targetArea > 0 ? targetArea / nominalRate + rampDuration : 0 }
+    var inletRate: Double { emissionRate(at: time) }
+
+    private func emissionRate(at instant: Double) -> Double {
+        guard rampDuration > 0, instant > 0, instant < pourDuration else { return 0 }
+        let u = min(1, instant / rampDuration, (pourDuration - instant) / rampDuration)
+        return nominalRate * u * u * (3 - 2 * u)
+    }
+
+    private func cumulativeEmission(at instant: Double) -> Double {
+        guard rampDuration > 0, instant > 0 else { return 0 }
+        if instant >= pourDuration { return targetArea }
+        func rampIntegral(_ u: Double) -> Double { u * u * u * (1 - 0.5 * u) }
+        if instant < rampDuration {
+            return nominalRate * rampDuration * rampIntegral(instant / rampDuration)
+        }
+        if instant > pourDuration - rampDuration {
+            return targetArea - nominalRate * rampDuration * rampIntegral((pourDuration - instant) / rampDuration)
+        }
+        return nominalRate * (instant - rampDuration / 2)
+    }
+
     var capacity: Double { width * height }
     var fraction: Double { emittedArea / capacity }
     var landedFraction: Double { landedArea / capacity }
@@ -114,9 +138,11 @@ final class WaterModel {
             let dt = min(remaining, 1.0 / 240, 0.4 * dx / maxSpeed)
             time += dt
             if isPouring {
-                let amount = min(configuration.flow * capacity * dt, targetArea - emittedArea)
+                // Integrating the smooth inlet envelope keeps the requested total exact,
+                // including very small fills whose start/end ramps meet immediately.
+                let amount = min(max(0, cumulativeEmission(at: time) - emittedArea), targetArea - emittedArea)
                 emittedArea += amount
-                parcels.append(Parcel(time: time, area: amount))
+                if amount > 0 { parcels.append(Parcel(time: min(time - dt / 2, pourDuration), area: amount)) }
             }
             advanceDrops(dt: dt)
             for i in impactImpulse.indices { impactImpulse[i] = 0 }
@@ -130,7 +156,7 @@ final class WaterModel {
 
     private func flightPosition(age: Double) -> SIMD2<Double> {
         let x = configuration.sourcePosition * width + inletSpeed * sin(angle) * age
-        let y = inletSpeed * cos(angle) * age + 0.5 * gravity * age * age
+        let y = inletSpeed * cos(angle) * age + 0.5 * gravity * max(0, age) * max(0, age)
         return SIMD2(min(max(x, 0.002), width - 0.002), y)
     }
 
@@ -307,13 +333,21 @@ final class WaterModel {
         }
     }
 
+    static let maximumStreamVertices = 242
+
     func streamVertices() -> [WaterVertex] {
-        guard let first = parcels.first, let last = parcels.last else { return [] }
-        let youngest = max(0, time - last.time)
+        guard let first = parcels.first else { return [] }
+        // Extend the inlet above the viewport so its flat cross-section cannot
+        // appear as a diagonal cut inside the screen, even at steep pour angles.
+        let inletExtension = -(nominalRate / inletSpeed + 0.02) / (inletSpeed * cos(angle))
+        let youngest = isPouring ? inletExtension : max(0, time - pourDuration)
         var oldest = time - first.time
         // Parcels stop just before collision. Extend the visible head to the actual
         // surface instead of leaving a frame-sized gap above the impact cavity.
-        if isPouring || parcels.count > 1 {
+        let head = flightPosition(age: oldest)
+        let headColumn = min(columnCount - 1, max(0, Int(head.x / dx)))
+        let nearSurface = height - depths[headColumn] - head.y < 0.02
+        if nearSurface && (isPouring || parcels.count > 1) {
             for _ in 0..<32 {
                 let head = flightPosition(age: oldest)
                 let column = min(columnCount - 1, max(0, Int(head.x / dx)))
@@ -321,18 +355,30 @@ final class WaterModel {
                 oldest += 1.0 / 960
             }
         }
-        let areaRate = configuration.flow * capacity
         var vertices: [WaterVertex] = []
-        for i in 0...96 {
-            let age = youngest + (oldest - youngest) * Double(i) / 96
+        vertices.reserveCapacity(Self.maximumStreamVertices)
+        var ages = (0...96).map { youngest + (oldest - youngest) * Double($0) / 96 }
+        // Resolve both narrow ends without spending more samples on the whole jet.
+        for i in 0..<12 {
+            let offset = rampDuration * Double(i) / 12
+            for emittedAt in [offset, pourDuration - offset] {
+                let age = time - emittedAt
+                if age > youngest && age < oldest { ages.append(age) }
+            }
+        }
+        ages.sort()
+        for (index, age) in ages.enumerated() {
+            // Each section retains the inlet rate at its emission time. The ramp
+            // travels down the jet instead of shrinking every section at once.
+            let areaRate = emissionRate(at: min(time, time - age))
             var point = flightPosition(age: age)
             let phase = (time - age) * 29
             // Advected inlet disturbances grow during flight; they are a visual
             // approximation, not a surface-tension or turbulence solver.
-            let growth = min(1, age * 3)
+            let growth = min(1, max(0, age * 3))
             let wobble = (sin(phase) + 0.4 * sin(phase * 1.73)) * 0.006 * growth
             let onWall = point.x <= 0.002 || point.x >= width - 0.002
-            let velocity = SIMD2(onWall ? 0 : inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * age)
+            let velocity = SIMD2(onWall ? 0 : inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * max(0, age))
             let speed = simd_length(velocity)
             let normal = SIMD2(velocity.y, -velocity.x) / speed
             let halfWidth = areaRate / (2 * speed) * (1 + 0.22 * growth * sin(phase * 1.3))
@@ -340,7 +386,7 @@ final class WaterModel {
             for side in [-1.0, 1.0] {
                 let edge = point + side * halfWidth * normal
                 vertices.append(WaterVertex(position: SIMD2(Float(edge.x / width), Float(1 - edge.y / height)),
-                                            texture: SIMD2(Float(side), Float(i) / 96)))
+                                            texture: SIMD2(Float(side), Float(index) / Float(ages.count - 1))))
             }
         }
         return vertices
@@ -359,7 +405,7 @@ final class FluidSimulation {
         model = WaterModel(aspectRatio: aspectRatio)
         guard let surface = device.makeBuffer(length: model.columnCount * MemoryLayout<Float>.stride,
                                               options: .storageModeShared),
-              let stream = device.makeBuffer(length: 194 * MemoryLayout<WaterVertex>.stride,
+              let stream = device.makeBuffer(length: WaterModel.maximumStreamVertices * MemoryLayout<WaterVertex>.stride,
                                              options: .storageModeShared),
               let splash = device.makeBuffer(length: WaterModel.maximumDrops * 6 * MemoryLayout<WaterVertex>.stride,
                                              options: .storageModeShared) else {

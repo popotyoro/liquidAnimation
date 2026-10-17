@@ -107,6 +107,36 @@ struct LiquidAnimationTests {
         #expect(water.impactPressure.allSatisfy { $0 == 0 })
     }
 
+    @Test(arguments: [0.001, 0.5])
+    func inletRampsAtBothEndsAndStillDeliversRequestedVolume(fill: Double) {
+        let water = WaterModel(aspectRatio: 2.16)
+        var config = FluidConfiguration()
+        config.fill = fill
+        config.flow = 0.16
+        water.reset(configuration: config, start: true)
+        let duration = water.pourDuration
+        let ramp = min(0.25, fill / config.flow)
+        func advance(to instant: Double) {
+            while water.time < instant - 1e-9 { water.advance(by: min(1 / 60, instant - water.time)) }
+        }
+        advance(to: ramp / 4)
+        let startRate = water.inletRate
+        advance(to: duration / 2)
+        let peakRate = water.inletRate
+        #expect(startRate > 0 && startRate < peakRate * 0.25)
+        let jet = water.streamVertices()
+        #expect(jet.count <= WaterModel.maximumStreamVertices)
+        #expect(jet.count >= 2)
+        if jet.count >= 2 { #expect(jet[0].position.y > 1 && jet[1].position.y > 1) }
+        advance(to: duration - ramp / 4)
+        #expect(abs(water.inletRate - startRate) < 1e-9)
+        #expect(water.fraction < fill)
+        advance(to: duration + 1)
+        #expect(water.inletRate == 0)
+        #expect(abs(water.fraction - fill) < 1e-9)
+        #expect(abs(water.landedFraction - fill) < 1e-9)
+    }
+
     @Test
     func resetClearsPoolAndFallingStream() {
         let water = WaterModel(aspectRatio: 2.16)
