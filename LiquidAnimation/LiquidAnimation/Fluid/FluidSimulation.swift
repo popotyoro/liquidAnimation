@@ -28,6 +28,8 @@ final class WaterModel {
     private var momentum: [Double]
     private var heightFlux: [Double]
     private var momentumFlux: [Double]
+    private(set) var impactPressure: [Double] // pressure / density, m²/s²
+    private var impactImpulse: [Double]
     private(set) var configuration = FluidConfiguration()
     private(set) var emittedArea = 0.0
     private(set) var landedArea = 0.0
@@ -78,6 +80,8 @@ final class WaterModel {
         momentum = depths
         heightFlux = .init(repeating: 0, count: self.columnCount + 1)
         momentumFlux = heightFlux
+        impactPressure = depths
+        impactImpulse = depths
     }
 
     func reset(configuration: FluidConfiguration, start: Bool) {
@@ -90,7 +94,12 @@ final class WaterModel {
         drops.removeAll(keepingCapacity: true)
         lastSplashTime = -1
         splashSequence = 0
-        for i in depths.indices { depths[i] = 0; momentum[i] = 0 }
+        for i in depths.indices {
+            depths[i] = 0
+            momentum[i] = 0
+            impactPressure[i] = 0
+            impactImpulse[i] = 0
+        }
     }
 
     func advance(by duration: Double) {
@@ -110,7 +119,9 @@ final class WaterModel {
                 parcels.append(Parcel(time: time, area: amount))
             }
             advanceDrops(dt: dt)
+            for i in impactImpulse.indices { impactImpulse[i] = 0 }
             depositArrivals()
+            updateImpactPressure(dt: dt)
             solveShallowWater(dt: dt)
             remaining -= dt
         }
@@ -154,6 +165,19 @@ final class WaterModel {
                         velocity: SIMD2(side * rise * 0.8 + inletSpeed * sin(angle) * 0.15, -rise),
                         area: splashArea / 2))
                 }
+            }
+            // Spread vertical momentum flux over the jet footprint. A wider pressure
+            // footprint also resolves the cavity with several shallow-water cells.
+            let sigma = max(2.5 * dx, configuration.flow * capacity / impactSpeed * 0.65)
+            let radius = Int(ceil(3 * sigma / dx))
+            let impactLower = max(0, column - radius), impactUpper = min(columnCount - 1, column + radius)
+            var pressureWeight = 0.0
+            for i in impactLower...impactUpper {
+                pressureWeight += exp(-0.5 * pow((Double(i) + 0.5) * dx - point.x, 2) / (sigma * sigma))
+            }
+            for i in impactLower...impactUpper {
+                let weight = exp(-0.5 * pow((Double(i) + 0.5) * dx - point.x, 2) / (sigma * sigma)) / pressureWeight
+                impactImpulse[i] += parcel.area * impactSpeed * weight / dx
             }
             let deposited = parcel.area - splashArea
             landedArea += deposited
@@ -223,6 +247,17 @@ final class WaterModel {
         return vertices
     }
 
+    private func updateImpactPressure(dt: Double) {
+        // Depth-averaged external pressure force: -h ∂(p/ρ)/∂x.
+        // A 60 ms response filters discrete arrivals. Coupling and a 6 cm head cap
+        // approximate unresolved vertical impact without an unstable deep cavity.
+        let response = 1 - exp(-dt / 0.06)
+        for i in depths.indices {
+            let target = min(gravity * 0.06, 0.12 * impactImpulse[i] / dt)
+            impactPressure[i] += (target - impactPressure[i]) * response
+        }
+    }
+
     private func solveShallowWater(dt: Double) {
         // Rusanov flux for (h, hu): F = (hu, hu²/h + g h²/2).
         // Reflecting ghost cells make the mass flux at each wall exactly zero.
@@ -242,7 +277,10 @@ final class WaterModel {
         let drag = exp(-2.8 * dt)
         for i in depths.indices {
             depths[i] = max(0, depths[i] - ratio * (heightFlux[i + 1] - heightFlux[i]))
-            momentum[i] = (momentum[i] - ratio * (momentumFlux[i + 1] - momentumFlux[i])) * drag
+            let left = max(0, i - 1), right = min(columnCount - 1, i + 1)
+            let pressureGradient = (impactPressure[right] - impactPressure[left]) / (Double(right - left) * dx)
+            momentum[i] = (momentum[i] - ratio * (momentumFlux[i + 1] - momentumFlux[i])
+                           - depths[i] * pressureGradient * dt) * drag
             if depths[i] <= dryDepth { momentum[i] = 0 }
             else { momentum[i] = min(max(momentum[i], -2.5 * depths[i]), 2.5 * depths[i]) }
         }
@@ -272,7 +310,17 @@ final class WaterModel {
     func streamVertices() -> [WaterVertex] {
         guard let first = parcels.first, let last = parcels.last else { return [] }
         let youngest = max(0, time - last.time)
-        let oldest = time - first.time
+        var oldest = time - first.time
+        // Parcels stop just before collision. Extend the visible head to the actual
+        // surface instead of leaving a frame-sized gap above the impact cavity.
+        if isPouring || parcels.count > 1 {
+            for _ in 0..<32 {
+                let head = flightPosition(age: oldest)
+                let column = min(columnCount - 1, max(0, Int(head.x / dx)))
+                if head.y >= height - depths[column] { break }
+                oldest += 1.0 / 960
+            }
+        }
         let areaRate = configuration.flow * capacity
         var vertices: [WaterVertex] = []
         for i in 0...96 {

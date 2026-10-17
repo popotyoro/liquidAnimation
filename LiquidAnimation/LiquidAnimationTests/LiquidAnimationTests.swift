@@ -82,6 +82,32 @@ struct LiquidAnimationTests {
     }
 
     @Test
+    func ongoingImpactDepressesSurfaceAndPressureFadesAfterPouring() {
+        let water = WaterModel(aspectRatio: 2.16)
+        var config = FluidConfiguration()
+        config.angle = 0
+        water.reset(configuration: config, start: true)
+        for _ in 0..<180 { water.advance(by: 1 / 60) }
+        let center = Int(config.sourcePosition * Double(water.columnCount))
+        let shoulderDepth = (water.depths[center - 7] + water.depths[center + 7]) / 2
+        #expect(water.impactPressure[center] > 0.05)
+        #expect(shoulderDepth - water.depths[center] > 0.002)
+        #expect(abs(water.meanDepth / water.height - water.landedFraction) < 1e-8)
+        let stream = water.streamVertices()
+        #expect(stream.count >= 2)
+        if stream.count >= 2 {
+            let head = (stream[stream.count - 1].position + stream[stream.count - 2].position) / 2
+            let column = min(water.columnCount - 1, max(0, Int(Double(head.x) * Double(water.columnCount))))
+            #expect(Double(head.y) <= water.depths[column] / water.height + 0.002)
+        }
+        for _ in 0..<540 { water.advance(by: 1 / 60) }
+        #expect((water.impactPressure.max() ?? 0) < 1e-8)
+        #expect(water.surfaceRange / water.height < 0.01)
+        water.reset(configuration: config, start: false)
+        #expect(water.impactPressure.allSatisfy { $0 == 0 })
+    }
+
+    @Test
     func resetClearsPoolAndFallingStream() {
         let water = WaterModel(aspectRatio: 2.16)
         water.reset(configuration: FluidConfiguration(), start: true)
