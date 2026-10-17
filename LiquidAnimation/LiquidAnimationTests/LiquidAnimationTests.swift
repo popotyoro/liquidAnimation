@@ -137,6 +137,31 @@ struct LiquidAnimationTests {
         #expect(abs(water.landedFraction - fill) < 1e-9)
     }
 
+    @Test(arguments: [0.08, 0.16])
+    func fullTankApproachRemainsStableWhilePouring(flow: Double) {
+        let water = WaterModel(aspectRatio: 2.16)
+        var config = FluidConfiguration()
+        config.fill = 1
+        config.flow = flow
+        water.reset(configuration: config, start: true)
+        var lateRange = 0.0
+        var lateJump = 0.0
+        var previous = water.depths
+        for _ in 0..<960 {
+            water.advance(by: 1 / 60)
+            if water.landedFraction >= 0.85 {
+                lateRange = max(lateRange, water.surfaceRange / water.height)
+                lateJump = max(lateJump, zip(water.depths, previous).map { abs($0 - $1) / water.height }.max() ?? 0)
+                #expect(abs(water.meanDepth / water.height - water.landedFraction) < 1e-8)
+                #expect(water.depths.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= water.height + 1e-9 })
+            }
+            previous = water.depths
+        }
+        #expect(lateRange < 0.04)
+        #expect(lateJump < 0.01)
+        #expect(abs(water.landedFraction - 1) < 1e-9)
+    }
+
     @Test
     func resetClearsPoolAndFallingStream() {
         let water = WaterModel(aspectRatio: 2.16)

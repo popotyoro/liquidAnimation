@@ -185,11 +185,14 @@ final class WaterModel {
     private func depositArrivals() {
         var survivors: [Parcel] = []
         survivors.reserveCapacity(parcels.count)
+        // 同じ刻みで追加した水深を次の着水判定へ使うと、落下中の水が連鎖的に
+        // 吸い込まれてしまう。全区間を、更新前の同じ水面で判定する。
+        let collisionDepths = depths
         for parcel in parcels {
             let age = time - parcel.time
             let point = flightPosition(age: age)
             let column = min(columnCount - 1, max(0, Int(point.x / dx)))
-            if point.y < height - depths[column] {
+            if point.y < height - collisionDepths[column] {
                 survivors.append(parcel)
                 continue
             }
@@ -231,12 +234,18 @@ final class WaterModel {
             // 飛沫へ回した分を除き、残りを局所的な水深へ変換する。
             let deposited = parcel.area - splashArea
             landedArea += deposited
-            let lower = max(0, column - 3), upper = min(columnCount - 1, column + 3)
+            // 水位が上がると落下速度が小さく、水流は太くなる。投入先を固定7列に
+            // 絞らず、その時刻の水流幅で広げ、上端近くで局所水深が急増するのを防ぐ。
+            let landingSigma = max(1.5 * dx, emissionRate(at: parcel.time) / impactSpeed * 0.45)
+            let landingRadius = Int(ceil(3 * landingSigma / dx))
+            let lower = max(0, column - landingRadius), upper = min(columnCount - 1, column + landingRadius)
             var sum = 0.0
-            for i in lower...upper { sum += exp(-0.5 * pow(Double(i - column) / 1.5, 2)) }
+            for i in lower...upper {
+                sum += exp(-0.5 * pow(((Double(i) + 0.5) * dx - point.x) / landingSigma, 2))
+            }
             let horizontal = inletSpeed * sin(angle)
             for i in lower...upper {
-                let weight = exp(-0.5 * pow(Double(i - column) / 1.5, 2)) / sum
+                let weight = exp(-0.5 * pow(((Double(i) + 0.5) * dx - point.x) / landingSigma, 2)) / sum
                 let addedDepth = deposited * weight / dx
                 depths[i] += addedDepth
                 // 着水の横への広がりを近似する運動量。水の量は増やさない。
