@@ -23,6 +23,8 @@ SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iO
 
 インデントはスペース4つ。型は `UpperCamelCase`、変数・関数は `lowerCamelCase`、ファイル名は主な型に合わせる。現時点で専用のフォーマッターやリンターは導入していない。
 
+アプリとテストは Swift 6、`SWIFT_STRICT_CONCURRENCY = complete` を使用する。アプリは既定の MainActor 隔離を利用し、型への重複した `@MainActor` は省く。UI・水面モデル・描画バッファの変更をこの隔離内に保つ。Metal の完了通知は `@Sendable` とし、値を取り出してから `Task { @MainActor in ... }` で戻す。テスト側の既定は nonisolated のため、必要なテストには `@MainActor` を付ける。共有する値型は `Sendable` にする。警告回避のためにチェックを弱めたり、`@unchecked Sendable` を追加したりしない。
+
 SwiftUI は設定と操作、CPU は浅水モデルと液量の計算、Metal は水面と水流の描画を担当する。毎フレームの粒子データを SwiftUI の状態へ流さず、表示する計測値の更新頻度を抑える。Swift と Metal で共有する構造体は、フィールド順序・型・メモリアラインメントを一致させる。
 
 ## 物理計算と検証

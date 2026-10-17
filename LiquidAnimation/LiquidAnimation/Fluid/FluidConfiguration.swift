@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct FluidConfiguration: Equatable {
+nonisolated struct FluidConfiguration: Equatable, Sendable {
     var fill = 0.5
     var opacity = 0.45
     var sourcePosition = 0.25
@@ -20,7 +20,6 @@ struct FluidConfiguration: Equatable {
 }
 
 @Observable
-@MainActor
 final class FluidControls {
     var configuration = FluidConfiguration()
     private(set) var restartID = 0

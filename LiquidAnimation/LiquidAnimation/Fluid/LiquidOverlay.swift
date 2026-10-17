@@ -32,7 +32,6 @@ struct LiquidOverlay: UIViewRepresentable {
     }
 }
 
-@MainActor
 final class LiquidRenderer: NSObject, MTKViewDelegate {
     private let controls: FluidControls
     private var queue: (any MTLCommandQueue)?
@@ -41,6 +40,8 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     private var streamPipeline: (any MTLRenderPipelineState)?
     private var simulation: FluidSimulation?
     private var simulationAspect = 0.0
+    // CPU buffer writes resume only after the preceding GPU command has completed.
+    // MainActor serializes this gate and all model/Metal buffer mutations.
     private var pending = false
     private var previousTime: CFTimeInterval?
     private var reportTime = CACurrentMediaTime()
@@ -140,7 +141,9 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             pending = true
             let fraction = simulation.model.fraction
             let pouring = simulation.model.isPouring
-            command.addCompletedHandler { [weak self] completed in
+            command.addCompletedHandler { @Sendable [weak self] completed in
+                // Metal invokes this outside MainActor. Extract values here; never pass
+                // the command buffer or mutable simulation state into the UI task.
                 let gpuMS = max(0, completed.gpuEndTime - completed.gpuStartTime) * 1_000
                 let message = completed.error?.localizedDescription
                 Task { @MainActor [weak self] in

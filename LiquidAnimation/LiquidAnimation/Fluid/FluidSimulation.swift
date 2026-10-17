@@ -2,16 +2,16 @@ import Foundation
 import Metal
 import simd
 
-struct WaterVertex {
+nonisolated struct WaterVertex: Sendable {
     var position: SIMD2<Float>
     var texture: SIMD2<Float>
 }
 
-struct WaterUniforms {
+nonisolated struct WaterUniforms: Sendable {
     var viewport: SIMD4<Float> // pixel width, pixel height, opacity, surface sample count
 }
 
-enum FluidError: LocalizedError {
+nonisolated enum FluidError: LocalizedError {
     case unavailable(String)
     var errorDescription: String? {
         switch self { case .unavailable(let message): message }
@@ -20,7 +20,6 @@ enum FluidError: LocalizedError {
 
 /// A finite-volume shallow-water cross-section plus a volume ledger for the falling jet.
 /// Heights and momentum use meters and square meters per second, respectively.
-@MainActor
 final class WaterModel {
     let columnCount: Int
     let width = 0.75
@@ -207,7 +206,6 @@ final class WaterModel {
     }
 }
 
-@MainActor
 final class FluidSimulation {
     let model: WaterModel
     let surfaceBuffer: any MTLBuffer
