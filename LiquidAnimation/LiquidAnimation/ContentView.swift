@@ -8,7 +8,8 @@ struct ContentView: View {
         DemoBackground()
         .liquidOverlay(controls: controls, ignoresSafeArea: true)
         .overlay(alignment: .bottom) {
-            controlBar.padding(.horizontal).padding(.bottom, 8)
+            FluidControlBar(controls: controls) { showsSettings = true }
+                .padding(.horizontal).padding(.bottom, 8)
         }
         .sheet(isPresented: $showsSettings) {
             FluidSettingsView(controls: controls)
@@ -24,34 +25,7 @@ struct ContentView: View {
         }
     }
 
-    private var controlBar: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text(controls.isPaused ? "一時停止中" : controls.status).font(.caption)
-                Spacer()
-                Text("投入 \(controls.insertedFraction, format: .percent.precision(.fractionLength(0)))")
-                    .font(.caption.monospacedDigit())
-            }
-            HStack(spacing: 12) {
-                Button("注ぐ", systemImage: "drop.fill") { controls.pour() }
-                    .buttonStyle(.borderedProminent)
-                Button(controls.isPaused ? "再開" : "一時停止",
-                       systemImage: controls.isPaused ? "play.fill" : "pause.fill") {
-                    controls.isPaused.toggle()
-                }
-                .labelStyle(.iconOnly)
-                Button("空にする", systemImage: "arrow.counterclockwise") { controls.reset() }
-                    .labelStyle(.iconOnly)
-                Spacer(minLength: 0)
-                Button("設定", systemImage: "slider.horizontal.3") { showsSettings = true }
-                    .labelStyle(.iconOnly)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-        }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-    }
+
 }
 
 private struct DemoBackground: View {
@@ -100,7 +74,7 @@ private struct DemoBackground: View {
             }
             .padding(24).padding(.top, 12)
         }
-        .safeAreaPadding(.bottom, 128)
+        .safeAreaPadding(.bottom, 176)
         .background(Color(uiColor: .systemGroupedBackground))
     }
 }

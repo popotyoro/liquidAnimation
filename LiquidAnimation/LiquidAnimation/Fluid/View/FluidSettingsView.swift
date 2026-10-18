@@ -37,13 +37,7 @@ struct FluidSettingsView: View {
                 } footer: {
                     Text("目標量と注ぎ方は次に「注ぐ」を押すと反映し、空の状態から開始します。角度は下向きが 0°、正の値で右向きです。")
                 }
-                Section("計測") {
-                    LabeledContent("描画頻度", value: String(format: "%.0f fps", controls.framesPerSecond))
-                    LabeledContent("GPU 時間", value: String(format: "%.1f ms", controls.gpuMilliseconds))
-                    LabeledContent("物理計算（CPU）", value: String(format: "%.1f ms", controls.simulationMilliseconds))
-                    Text("60fps は目標値です。性能の判断には実機での測定が必要です。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+
             }
             .navigationTitle("液体の設定")
             .navigationBarTitleDisplayMode(.inline)
