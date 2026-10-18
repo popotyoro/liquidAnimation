@@ -8,6 +8,18 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct WaterRenderingTests {
+    @Test("着水中の盛り上がりと注水後に静まる水面を時系列で描画できる")
+    func impactSurfaceRendersOverTime() throws {
+        let scene = try OffscreenWater()
+        var previousFrame = 0
+        for frame in [60, 90, 120, 150, 180, 210, 240, 480] {
+            scene.advance(frames: frame - previousFrame)
+            let image = try scene.render()
+            try image.save(frame: frame, prefix: "water-impact")
+            previousFrame = frame
+        }
+    }
+
     @Test("ビールの泡から液体へ戻る過程を時系列で描画できる")
     func beerFoamRendersOverTime() throws {
         let scene = try OffscreenWater(kind: .beer)

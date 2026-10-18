@@ -26,6 +26,27 @@ float impactRippleHeight(float x, float time, float pressure) {
            + 0.35f * sin(x * 56.54867f + time * 11));
 }
 
+// 着水点の両側に薄い肩を作り、外へ進むほど広がって水面へ戻す。
+// 2つのパルスを重ねた表示用近似。巻き返りや砕波の物理計算ではない。
+float impactShoulderHeight(float x, float time, float center, float pressure) {
+    float strength = clamp(pressure, 0.0f, 1.0f);
+    if (strength <= 1e-5f) return 0;
+    float distance = x - center;
+    float height = 0;
+    for (int i = 0; i < 2; ++i) {
+        float age = fract(time * 2.1f + float(i) * 0.5f);
+        float envelope = pow(sin(age * M_PI_F), 2.0f);
+        float travel = 0.018f + 0.080f * age;
+        float width = 0.010f + 0.020f * age;
+        float left = exp(-0.5f * pow((distance + travel) / width, 2.0f));
+        float right = exp(-0.5f * pow((distance - travel) / width, 2.0f));
+        // 着水中心は変えず、水流の先端と物理水面の接続を保つ。
+        float outsideJet = 1 - exp(-pow(distance / 0.012f, 2.0f));
+        height += 0.035f * strength * envelope * (left + right) * outsideJet;
+    }
+    return height;
+}
+
 // 全パスでalpha乗算済みの色を返し、one / oneMinusSourceAlphaの合成と揃える。
 half4 premultipliedColor(float3 color, float alpha) {
     return half4(half3(color * alpha), half(alpha));
@@ -67,7 +88,8 @@ float visibleSurface(float x, constant WaterUniforms &s, device const float *hei
     float room = smoothstep(0.0f, 0.04f, min(surface, 1 - surface) * aspect);
     float meniscus = meniscusHeight(x);
     float ripples = impactRippleHeight(x, s.detail.z, s.detail.y);
-    float visible = clamp(surface + room * (meniscus + ripples) / aspect, 0.0f, 1.0f);
+    float shoulders = impactShoulderHeight(x, s.detail.z, s.detail.x, s.detail.y);
+    float visible = clamp(surface + room * (meniscus + ripples + shoulders) / aspect, 0.0f, 1.0f);
     return max(0.0f, visible - foamSurfaceInset(x, s.detail.z, s.foam.x, visible * aspect) / aspect);
 }
 
