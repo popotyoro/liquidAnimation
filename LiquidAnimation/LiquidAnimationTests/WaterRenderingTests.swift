@@ -8,104 +8,190 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct WaterRenderingTests {
-    @Test
-    func continuousWaterRendersAtHalfHeightWithConfiguredOpacity() throws {
+    @Test("50%まで溜まった水は画面上部を透明に保ち指定した不透明度で描く", arguments: [0.0, 0.45, 1.0])
+    func settledPoolUsesConfiguredOpacity(opacity: Double) throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+
+        let image = try scene.render(opacity: opacity)
+
+        #expect(image.alpha(x: image.width / 2, y: image.height / 4) == 0)
+        #expect(abs(Int(image.alpha(x: image.width / 2, y: image.height * 3 / 4)) - Int((opacity * 255).rounded())) <= 1)
+        if opacity == 0.45 { try image.save(frame: 480) }
+    }
+
+    @Test("静止した水面は壁際だけ少し持ち上がり中央はほぼ50%に保つ")
+    func settledPoolRisesSlightlyAtWalls() throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+
+        let image = try scene.render()
+        let aboveSurface = image.height / 2 - 2
+
+        #expect(image.alpha(x: 2, y: aboveSurface) > 100)
+        #expect(image.alpha(x: image.width - 3, y: aboveSurface) > 100)
+        #expect(image.alpha(x: image.width / 2, y: aboveSurface) == 0)
+    }
+
+    @Test("空の容器には液体を描かない")
+    func emptyContainerRendersNothing() throws {
+        let scene = try OffscreenWater(fill: 0)
+        scene.advance(frames: 60)
+
+        let image = try scene.render()
+
+        #expect(image.pixels.allSatisfy { $0 == 0 })
+    }
+
+    @Test("不透明度0では注水中の水流・水面・飛沫・気泡を描かない")
+    func zeroOpacityHidesEveryWaterLayer() throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 120)
+        #expect(scene.fluid.model.bubbleCount > 0)
+        #expect(scene.fluid.model.splashCount > 0)
+
+        let image = try scene.render(opacity: 0)
+
+        #expect(image.pixels.allSatisfy { $0 == 0 })
+    }
+
+    @Test("注水開始と減流中も水流が描画される", arguments: [8, 195])
+    func rampingJetRemainsVisible(frame: Int) throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: frame)
+
+        let image = try scene.render()
+
+        #expect(scene.fluid.streamVertexCount > 0)
+        #expect(image.pixels.enumerated().contains { $0.offset % 4 == 3 && $0.element > 0 })
+        try image.save(frame: frame)
+    }
+
+    @Test("注水中は気泡の描画データがあり静止後にはなくなる")
+    func entrainedBubblesDisappearAfterPouring() throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 120)
+        let pouring = try scene.render()
+        #expect(scene.fluid.bubbleVertexCount > 0)
+        try pouring.save(frame: 120)
+
+        scene.advance(frames: 360)
+        _ = try scene.render()
+
+        #expect(scene.fluid.bubbleVertexCount == 0)
+    }
+
+    @Test("入口を止めても未着水の水流は描画される")
+    func stoppedInletKeepsFallingWaterVisible() throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 210)
+
+        let image = try scene.render()
+
+        #expect(!scene.fluid.model.isPouring)
+        #expect(abs(scene.fluid.model.fraction - 0.5) < 1e-9)
+        #expect(scene.fluid.streamVertexCount > 0)
+        try image.save(frame: 210)
+    }
+
+    @Test("分離した水流の末尾は容器へ戻るまで水滴の描画対象になる")
+    func separatedTailRendersAsDrops() throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 214)
+
+        let image = try scene.render()
+
+        #expect(scene.fluid.model.detachedDropCount > 0)
+        #expect(scene.fluid.splashVertexCount > 0)
+        try image.save(frame: 214)
+    }
+
+}
+
+/// 本番の転送・描画処理を、背景が透明なテクスチャへ実行するテスト用の場。
+/// 各テストが独立して所有し、モデルやGPU資源をテスト間で共有しない。
+@MainActor
+private final class OffscreenWater {
+    let fluid: FluidSimulation
+    private let queue: any MTLCommandQueue
+    private let pipelines: WaterRenderPipelines
+    private let target: any MTLTexture
+    private let width = 400
+    private let height = 864
+
+    init(fill: Double = 0.5) throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let library = try #require(device.makeDefaultLibrary())
-        let queue = try #require(device.makeCommandQueue())
-        let fluid = try FluidSimulation(device: device, aspectRatio: 2.16)
-        var config = FluidConfiguration()
-        config.flow = 0.16
-        fluid.model.reset(configuration: config, start: true)
-        let width = 400, height = 864
+        queue = try #require(device.makeCommandQueue())
+        pipelines = try WaterRenderPipelines(device: device, library: library, pixelFormat: .rgba8Unorm)
+        fluid = try FluidSimulation(device: device, aspectRatio: 2.16)
+        var configuration = FluidConfiguration()
+        configuration.fill = fill
+        configuration.flow = 0.16
+        fluid.model.reset(configuration: configuration, start: true)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
             width: width, height: height, mipmapped: false)
         descriptor.storageMode = .shared
         descriptor.usage = [.renderTarget]
-        let target = try #require(device.makeTexture(descriptor: descriptor))
+        target = try #require(device.makeTexture(descriptor: descriptor))
+    }
+
+    func advance(frames: Int) {
+        for _ in 0..<frames { fluid.model.advance(by: 1 / 60) }
+    }
+
+    func render(opacity: Double = 0.45) throws -> RenderedWater {
+        fluid.uploadSurface()
+        let command = try #require(queue.makeCommandBuffer())
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+        let encoder = try #require(command.makeRenderCommandEncoder(descriptor: pass))
+        let uniforms = WaterUniforms(viewport: SIMD4(Float(width), Float(height), Float(opacity),
+            Float(fluid.model.columnCount)), detail: fluid.model.visualDetails)
+        pipelines.encode(fluid, with: encoder, uniforms: uniforms)
+        encoder.endEncoding()
+        command.commit()
+        command.waitUntilCompleted()
+        try #require(command.status == .completed)
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let started = Date()
-        for frame in 1...480 {
-            fluid.model.advance(by: 1 / 60)
-            if ![8, 120, 195, 210, 214, 480].contains(frame) { continue }
-            if frame == 210 {
-                #expect(!fluid.model.isPouring)
-                #expect(!fluid.model.streamVertices().isEmpty)
-                #expect(abs(fluid.model.fraction - config.fill) < 1e-9)
-            }
-            if frame == 214 { #expect(fluid.model.detachedDropCount > 0) }
-            fluid.uploadSurface()
-            let command = try #require(queue.makeCommandBuffer())
-            let pass = MTLRenderPassDescriptor()
-            pass.colorAttachments[0].texture = target
-            pass.colorAttachments[0].loadAction = .clear
-            pass.colorAttachments[0].storeAction = .store
-            pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
-            let encoder = try #require(command.makeRenderCommandEncoder(descriptor: pass))
-            var uniforms = WaterUniforms(viewport: SIMD4(Float(width), Float(height), 0.45,
-                                                        Float(fluid.model.columnCount)))
-            uniforms.detail = fluid.model.visualDetails
-            if frame == 120 { #expect(fluid.model.bubbleCount > 0) }
-            if frame == 480 { #expect(fluid.model.bubbleCount == 0) }
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
-            for layer in 0...3 {
-                let stream = layer == 0
-                let bubble = layer == 2
-                let spray = layer == 3
-                if bubble && fluid.bubbleVertexCount == 0 { continue }
-                if spray && fluid.splashVertexCount == 0 { continue }
-                if stream && fluid.streamVertexCount == 0 { continue }
-                let pipeline = MTLRenderPipelineDescriptor()
-                pipeline.vertexFunction = library.makeFunction(name: bubble ? "bubbleVertex" : ((stream || spray) ? "streamVertex" : "waterVertex"))
-                pipeline.fragmentFunction = library.makeFunction(name: bubble ? "bubbleFragment" : (spray ? "splashFragment" : (stream ? "streamFragment" : "waterFragment")))
-                let color = pipeline.colorAttachments[0]!
-                color.pixelFormat = .rgba8Unorm
-                color.isBlendingEnabled = true
-                color.sourceRGBBlendFactor = .one
-                color.sourceAlphaBlendFactor = .one
-                color.destinationRGBBlendFactor = .oneMinusSourceAlpha
-                color.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-                encoder.setRenderPipelineState(try device.makeRenderPipelineState(descriptor: pipeline))
-                if bubble {
-                    encoder.setVertexBuffer(fluid.bubbleBuffer, offset: 0, index: 0)
-                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fluid.bubbleVertexCount)
-                } else if spray {
-                    encoder.setVertexBuffer(fluid.splashBuffer, offset: 0, index: 0)
-                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fluid.splashVertexCount)
-                } else if stream {
-                    encoder.setVertexBuffer(fluid.streamBuffer, offset: 0, index: 0)
-                    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: fluid.streamVertexCount)
-                } else {
-                    encoder.setFragmentBuffer(fluid.surfaceBuffer, offset: 0, index: 1)
-                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-                }
-            }
-            encoder.endEncoding()
-            command.commit()
-            command.waitUntilCompleted()
-            #expect(command.status == .completed)
-            target.getBytes(&pixels, bytesPerRow: width * 4,
-                            from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-            if frame == 480 {
-                #expect(pixels[(height / 4 * width + width / 2) * 4 + 3] == 0)
-                #expect(abs(Int(pixels[(height * 3 / 4 * width + width / 2) * 4 + 3]) - 115) <= 1)
-                // 静止後も壁際だけが少し持ち上がり、中央の水位はほぼ50%に保たれる。
-                let aboveSurface = height / 2 - 2
-                #expect(pixels[(aboveSurface * width + 2) * 4 + 3] > 100)
-                #expect(pixels[(aboveSurface * width + width / 2) * 4 + 3] == 0)
-            }
-            let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))
-            let image = try #require(CGImage(width: width, height: height, bitsPerComponent: 8,
-                bitsPerPixel: 32, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent))
-            let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("water-frame-\(frame).png")
-            let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL,
-                UTType.png.identifier as CFString, 1, nil))
-            CGImageDestinationAddImage(destination, image, nil)
-            #expect(CGImageDestinationFinalize(destination))
-            print("Water render: \(url.path)")
-        }
-        print("Water model and offscreen rendering: \(Date().timeIntervalSince(started) / 480 * 1000) ms/frame (debug, includes six captures)")
+        target.getBytes(&pixels, bytesPerRow: width * 4,
+                        from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        return RenderedWater(width: width, height: height, pixels: pixels)
+    }
+}
+
+private struct RenderedWater {
+    let width: Int
+    let height: Int
+    let pixels: [UInt8]
+
+    func alpha(x: Int, y: Int) -> UInt8 { pixels[(y * width + x) * 4 + 3] }
+
+    func save(frame: Int) throws {
+        let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))
+        let image = try #require(CGImage(width: width, height: height, bitsPerComponent: 8,
+            bitsPerPixel: 32, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent))
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("water-frame-\(frame).png")
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        try #require(CGImageDestinationFinalize(destination))
+        print("Water render: \(url.path)")
+    }
+}
+
+struct FluidBufferLayoutTests {
+    @Test("共有頂点と定数のメモリ配置がMetalのバッファ仕様に一致する")
+    func sharedLayoutsMatchMetal() {
+        #expect(MemoryLayout<WaterVertex>.stride == 16)
+        #expect(MemoryLayout<BubbleVertex>.stride == 32)
+        #expect(MemoryLayout<WaterUniforms>.stride == 32)
+        #expect(MemoryLayout<WaterVertex>.offset(of: \.texture) == 8)
+        #expect(MemoryLayout<BubbleVertex>.offset(of: \.appearance) == 16)
+        #expect(MemoryLayout<WaterUniforms>.offset(of: \.detail) == 16)
     }
 }

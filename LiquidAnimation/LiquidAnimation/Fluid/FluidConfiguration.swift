@@ -18,12 +18,16 @@ nonisolated struct FluidConfiguration: Equatable, Sendable {
     /// 外部からの設定でもNaN・無限大・範囲外の値を物理計算へ渡さない。
     var sanitized: Self {
         var value = self
-        value.fill = fill.isFinite ? min(max(fill, 0), 1) : 0.5
-        value.opacity = opacity.isFinite ? min(max(opacity, 0), 1) : 0.45
-        value.sourcePosition = sourcePosition.isFinite ? min(max(sourcePosition, 0.15), 0.85) : 0.25
-        value.angle = angle.isFinite ? min(max(angle, -65), 65) : 30
-        value.flow = flow.isFinite ? min(max(flow, 0.02), 0.16) : 0.08
+        value.fill = finiteValue(fill, in: 0...1, fallback: 0.5)
+        value.opacity = finiteValue(opacity, in: 0...1, fallback: 0.45)
+        value.sourcePosition = finiteValue(sourcePosition, in: 0.15...0.85, fallback: 0.25)
+        value.angle = finiteValue(angle, in: -65...65, fallback: 30)
+        value.flow = finiteValue(flow, in: 0.02...0.16, fallback: 0.08)
         return value
+    }
+
+    private func finiteValue(_ value: Double, in range: ClosedRange<Double>, fallback: Double) -> Double {
+        value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : fallback
     }
 }
 

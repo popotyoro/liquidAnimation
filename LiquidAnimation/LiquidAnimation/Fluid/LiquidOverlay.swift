@@ -66,58 +66,67 @@ private struct LiquidOverlay: UIViewRepresentable {
     }
 }
 
-/// MTKViewのフレームごとに操作を反映し、モデル更新・転送・描画を行う。
+/// 操作要求の消費順序と再生時刻を管理する。MetalやViewを持たず、停止中も操作を受け取る。
+struct FluidPlayback {
+    private var previousTime: CFTimeInterval?
+    private var lastRestart = 0
+    private var lastReset = 0
+
+    mutating func advance(_ model: WaterModel, controls: FluidControls, now: CFTimeInterval) {
+        consumeRequests(model, controls: controls)
+        // 復帰や処理落ち後も大量の追いつき計算をしない。Floatへの丸めも従来どおり。
+        let dt = Float(min(max(now - (previousTime ?? (now - 1 / 60)), 0), 1 / 60))
+        previousTime = now
+        if !controls.isPaused && (model.hasWater || model.isPouring) {
+            model.advance(by: Double(dt))
+        }
+    }
+
+    mutating func discardElapsedTime() { previousTime = nil }
+
+    /// リサイズで空に戻した場合、直前の操作要求を新しい容器へ持ち越さない。
+    mutating func acknowledgeRequests(from controls: FluidControls) {
+        lastRestart = controls.restartID
+        lastReset = controls.resetID
+    }
+
+    private mutating func consumeRequests(_ model: WaterModel, controls: FluidControls) {
+        // リセットは、それ以前の再注水要求も処理済みにする。
+        if controls.resetID != lastReset {
+            model.reset(configuration: controls.configuration, start: false)
+            acknowledgeRequests(from: controls)
+        }
+        if controls.restartID != lastRestart {
+            model.reset(configuration: controls.configuration, start: true)
+            lastRestart = controls.restartID
+        }
+    }
+}
+
+/// MTKViewのフレームを調停する。物理更新・描画設定・計測報告の詳細は各担当へ委ねる。
 /// アプリ既定のMainActor隔離で、UI状態と共有バッファの変更を直列化する。
 final class LiquidRenderer: NSObject, MTKViewDelegate {
     private let controls: FluidControls
     private var queue: (any MTLCommandQueue)?
-    private var library: (any MTLLibrary)?
-    private var renderPipeline: (any MTLRenderPipelineState)?
-    private var bubblePipeline: (any MTLRenderPipelineState)?
-    private var splashPipeline: (any MTLRenderPipelineState)?
-    private var streamPipeline: (any MTLRenderPipelineState)?
+    private var pipelines: WaterRenderPipelines?
     private var simulation: FluidSimulation?
     private var simulationAspect = 0.0
-    // 共有バッファをGPUが読んでいる間にCPUが書き換えないよう、同時実行を1フレームに制限する。
-    // pendingの参照・更新もMainActor上で行う。
+    // GPUが共有バッファを読んでいる間は書き換えない。同時実行は1フレームまで。
     private var pending = false
-    private var previousTime: CFTimeInterval?
+    private var playback = FluidPlayback()
     private var reportTime = CACurrentMediaTime()
     private var reportFrames = 0
-    private var lastRestart = 0
-    private var lastReset = 0
 
     init(controls: FluidControls) { self.controls = controls }
 
-    /// 初期化時に4種類の描画パイプラインを作り、毎フレームの生成を避ける。
     func attach(to view: MTKView) {
         do {
             guard let device = view.device, let queue = device.makeCommandQueue(),
                   let library = device.makeDefaultLibrary() else {
                 throw FluidError.unavailable("この環境では Metal を初期化できませんでした。")
             }
-            let descriptor = MTLRenderPipelineDescriptor()
-            descriptor.vertexFunction = library.makeFunction(name: "waterVertex")
-            descriptor.fragmentFunction = library.makeFunction(name: "waterFragment")
-            let attachment = descriptor.colorAttachments[0]!
-            attachment.pixelFormat = view.colorPixelFormat
-            // シェーダーが返す色はalpha乗算済み。背景へ one / oneMinusSourceAlpha で合成する。
-            attachment.isBlendingEnabled = true
-            attachment.sourceRGBBlendFactor = .one
-            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            attachment.sourceAlphaBlendFactor = .one
-            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            renderPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-            descriptor.vertexFunction = library.makeFunction(name: "streamVertex")
-            descriptor.fragmentFunction = library.makeFunction(name: "streamFragment")
-            streamPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-            descriptor.fragmentFunction = library.makeFunction(name: "splashFragment")
-            splashPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-            descriptor.vertexFunction = library.makeFunction(name: "bubbleVertex")
-            descriptor.fragmentFunction = library.makeFunction(name: "bubbleFragment")
-            bubblePipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            pipelines = try WaterRenderPipelines(device: device, library: library, pixelFormat: view.colorPixelFormat)
             self.queue = queue
-            self.library = library
         } catch {
             controls.error = error.localizedDescription
         }
@@ -125,115 +134,142 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
 
     /// サイズ変更前の時刻差を次のフレームへ持ち越さない。
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        previousTime = nil
+        playback.discardElapsedTime()
     }
 
-    /// GPUの前フレームが完了し、描画先を確保できたときだけ次のフレームを処理する。
+    /// 描画先と前フレームの完了を確認してから、更新・転送・描画・完了通知を順に行う。
     func draw(in view: MTKView) {
         guard !pending, controls.error == nil,
-              let device = view.device, library != nil, let queue, let renderPipeline, let streamPipeline, let splashPipeline, let bubblePipeline,
+              let device = view.device, let queue, let pipelines,
               view.drawableSize.width > 0, view.drawableSize.height > 0,
               let drawable = view.currentDrawable,
               let pass = view.currentRenderPassDescriptor,
               let command = queue.makeCommandBuffer() else { return }
         do {
-            // 容器の縦横比が変わると物理領域も変わるため、量の再配置はせず空から作り直す。
-            let aspect = view.drawableSize.height / view.drawableSize.width
-            if simulation == nil || abs(simulationAspect - aspect) > 0.01 {
-                let resizing = simulation != nil
-                simulation = try FluidSimulation(device: device, aspectRatio: aspect)
-                simulationAspect = aspect
-                if resizing {
-                    controls.reset()
-                    controls.status = "画面サイズが変わったため空に戻しました"
-                    lastRestart = controls.restartID
-                    lastReset = controls.resetID
-                }
-            }
-            guard let simulation else { return }
-            // UIの操作IDを消費する。リセット時は過去の再注水要求も処理済みにする。
-            if controls.resetID != lastReset {
-                simulation.model.reset(configuration: controls.configuration, start: false)
-                lastReset = controls.resetID
-                lastRestart = controls.restartID
-            }
-            if controls.restartID != lastRestart {
-                simulation.model.reset(configuration: controls.configuration, start: true)
-                lastRestart = controls.restartID
-            }
-            let now = CACurrentMediaTime()
-            // 復帰や処理落ち後も大量の追いつき計算をせず、最大1/60秒だけ進める。
-            let dt = Float(min(max(now - (previousTime ?? (now - 1 / 60)), 0), 1 / 60))
-            previousTime = now
+            let simulation = try prepareSimulation(device: device, size: view.drawableSize)
             let simulationStart = CACurrentMediaTime()
-            if !controls.isPaused && (simulation.model.hasWater || simulation.model.isPouring) {
-                simulation.model.advance(by: Double(dt))
-            }
-            // 一時停止中も転送・描画は行い、不透明度などの表示設定を反映する。
+            playback.advance(simulation.model, controls: controls, now: simulationStart)
+            // 停止中も転送・描画して、不透明度などの表示設定を反映する。
             simulation.uploadSurface()
             let simulationMS = (CACurrentMediaTime() - simulationStart) * 1_000
             guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else {
                 throw FluidError.unavailable("液体の描画コマンドを作成できませんでした。")
             }
-            var uniforms = WaterUniforms(viewport: SIMD4(
-                Float(view.drawableSize.width), Float(view.drawableSize.height),
-                Float(controls.configuration.sanitized.opacity), Float(simulation.model.columnCount)))
-            uniforms.detail = simulation.model.visualDetails
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
-            // 水流 → 容器内の水 → 気泡 → 飛沫の順。水面より下の水流は容器内の水で覆う。
-            if simulation.streamVertexCount > 0 {
-                encoder.setRenderPipelineState(streamPipeline)
-                encoder.setVertexBuffer(simulation.streamBuffer, offset: 0, index: 0)
-                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: simulation.streamVertexCount)
-            }
-            encoder.setRenderPipelineState(renderPipeline)
-            encoder.setFragmentBuffer(simulation.surfaceBuffer, offset: 0, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-            if simulation.bubbleVertexCount > 0 {
-                encoder.setRenderPipelineState(bubblePipeline)
-                encoder.setVertexBuffer(simulation.bubbleBuffer, offset: 0, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: simulation.bubbleVertexCount)
-            }
-            if simulation.splashVertexCount > 0 {
-                encoder.setRenderPipelineState(splashPipeline)
-                encoder.setVertexBuffer(simulation.splashBuffer, offset: 0, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: simulation.splashVertexCount)
-            }
+            let uniforms = makeUniforms(size: view.drawableSize, model: simulation.model)
+            pipelines.encode(simulation, with: encoder, uniforms: uniforms)
             encoder.endEncoding()
             command.present(drawable)
-            pending = true
-            let fraction = simulation.model.fraction
-            let pouring = simulation.model.isPouring
-            command.addCompletedHandler { @Sendable [weak self] completed in
-                // この通知はMainActor外で届く。時刻とエラー文字列だけを取り出し、
-                // コマンドバッファや変更可能なモデルをUIタスクへ渡さない。
-                let gpuMS = max(0, completed.gpuEndTime - completed.gpuStartTime) * 1_000
-                let message = completed.error?.localizedDescription
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.pending = false
-                    if let message { self.controls.error = message }
-                    self.reportFrames += 1
-                    let reportNow = CACurrentMediaTime()
-                    let interval = reportNow - self.reportTime
-                    // 毎フレームObservationを更新せず、計測表示は約0.5秒ごとにまとめる。
-                    if interval >= 0.5 {
-                        self.controls.framesPerSecond = Double(self.reportFrames) / interval
-                        self.controls.gpuMilliseconds = gpuMS
-                        self.controls.simulationMilliseconds = simulationMS
-                        self.controls.insertedFraction = fraction
-                        if !self.controls.isPaused {
-                            self.controls.status = pouring ? "注水中" :
-                                (fraction > 0 ? "注水完了・水面を計算中" : "注水して動きを確認")
-                        }
-                        self.reportFrames = 0
-                        self.reportTime = reportNow
-                    }
-                }
-            }
-            command.commit()
+            submit(command, model: simulation.model, simulationMilliseconds: simulationMS)
         } catch {
             controls.error = error.localizedDescription
         }
+    }
+
+    private func prepareSimulation(device: any MTLDevice, size: CGSize) throws -> FluidSimulation {
+        let aspect = size.height / size.width
+        if let simulation, abs(simulationAspect - aspect) <= 0.01 { return simulation }
+        // 容器の縦横比が変わると物理領域も変わるため、空から作り直す。
+        let resizing = simulation != nil
+        let replacement = try FluidSimulation(device: device, aspectRatio: aspect)
+        simulation = replacement
+        simulationAspect = aspect
+        if resizing {
+            controls.reset()
+            controls.status = "画面サイズが変わったため空に戻しました"
+            playback.acknowledgeRequests(from: controls)
+        }
+        return replacement
+    }
+
+    private func makeUniforms(size: CGSize, model: WaterModel) -> WaterUniforms {
+        WaterUniforms(viewport: SIMD4(Float(size.width), Float(size.height),
+            Float(controls.configuration.sanitized.opacity), Float(model.columnCount)), detail: model.visualDetails)
+    }
+
+    private func submit(_ command: any MTLCommandBuffer, model: WaterModel, simulationMilliseconds: Double) {
+        pending = true
+        let fraction = model.fraction
+        let pouring = model.isPouring
+        command.addCompletedHandler { @Sendable [weak self] completed in
+            // MainActor外では値だけを取り出し、コマンドやモデルをUIタスクへ渡さない。
+            let gpuMS = max(0, completed.gpuEndTime - completed.gpuStartTime) * 1_000
+            let message = completed.error?.localizedDescription
+            Task { @MainActor [weak self] in
+                self?.completeFrame(gpuMilliseconds: gpuMS, simulationMilliseconds: simulationMilliseconds,
+                                    fraction: fraction, pouring: pouring, error: message)
+            }
+        }
+        command.commit()
+    }
+
+    private func completeFrame(gpuMilliseconds: Double, simulationMilliseconds: Double,
+                               fraction: Double, pouring: Bool, error: String?) {
+        pending = false
+        if let error { controls.error = error }
+        reportFrames += 1
+        let now = CACurrentMediaTime()
+        let interval = now - reportTime
+        // Observationの更新は約0.5秒ごと。物理モデルの毎フレーム更新と分離する。
+        guard interval >= 0.5 else { return }
+        controls.framesPerSecond = Double(reportFrames) / interval
+        controls.gpuMilliseconds = gpuMilliseconds
+        controls.simulationMilliseconds = simulationMilliseconds
+        controls.insertedFraction = fraction
+        if !controls.isPaused {
+            controls.status = pouring ? "注水中" : (fraction > 0 ? "注水完了・水面を計算中" : "注水して動きを確認")
+        }
+        reportFrames = 0
+        reportTime = now
+    }
+}
+
+/// alpha乗算済みの合成設定と描画順を一か所で管理する。オフスクリーン検証でも同じ経路を使う。
+struct WaterRenderPipelines {
+    private let surface: any MTLRenderPipelineState
+    private let stream: any MTLRenderPipelineState
+    private let splash: any MTLRenderPipelineState
+    private let bubble: any MTLRenderPipelineState
+
+    init(device: any MTLDevice, library: any MTLLibrary, pixelFormat: MTLPixelFormat) throws {
+        func make(vertex: String, fragment: String) throws -> any MTLRenderPipelineState {
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name: vertex)
+            descriptor.fragmentFunction = library.makeFunction(name: fragment)
+            let attachment = descriptor.colorAttachments[0]!
+            attachment.pixelFormat = pixelFormat
+            attachment.isBlendingEnabled = true
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            return try device.makeRenderPipelineState(descriptor: descriptor)
+        }
+        surface = try make(vertex: "waterVertex", fragment: "waterFragment")
+        stream = try make(vertex: "streamVertex", fragment: "streamFragment")
+        splash = try make(vertex: "streamVertex", fragment: "splashFragment")
+        bubble = try make(vertex: "bubbleVertex", fragment: "bubbleFragment")
+    }
+
+    func encode(_ simulation: FluidSimulation, with encoder: any MTLRenderCommandEncoder, uniforms: WaterUniforms) {
+        var uniforms = uniforms
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WaterUniforms>.stride, index: 0)
+        // 水流 → 容器内の水 → 気泡 → 飛沫。水面より下の水流は容器内の水で覆う。
+        drawVertices(simulation.streamBuffer, count: simulation.streamVertexCount,
+                     primitive: .triangleStrip, pipeline: stream, encoder: encoder)
+        encoder.setRenderPipelineState(surface)
+        encoder.setFragmentBuffer(simulation.surfaceBuffer, offset: 0, index: 1)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        drawVertices(simulation.bubbleBuffer, count: simulation.bubbleVertexCount,
+                     primitive: .triangle, pipeline: bubble, encoder: encoder)
+        drawVertices(simulation.splashBuffer, count: simulation.splashVertexCount,
+                     primitive: .triangle, pipeline: splash, encoder: encoder)
+    }
+
+    private func drawVertices(_ buffer: any MTLBuffer, count: Int, primitive: MTLPrimitiveType,
+                              pipeline: any MTLRenderPipelineState, encoder: any MTLRenderCommandEncoder) {
+        guard count > 0 else { return }
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+        encoder.drawPrimitives(type: primitive, vertexStart: 0, vertexCount: count)
     }
 }
