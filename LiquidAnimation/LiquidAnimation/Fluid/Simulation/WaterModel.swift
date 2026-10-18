@@ -333,13 +333,18 @@ final class WaterModel {
         // 確定的な分布で発生点を散らす。乱数状態や毎フレームの追加配列は持たない。
         let phase = Double(carbonationSequence) * 2.399
         let variation = 0.5 + 0.5 * sin(phase)
-        let x = width * (0.06 + 0.88 * (Double(carbonationSequence) * 0.618034).truncatingRemainder(dividingBy: 1))
+        // 4か所から繰り返し出し、ばらばらの点ではなく上昇する泡の列として見せる。
+        let source = (carbonationSequence - 1) % 4
+        let x = width * (0.16 + 0.68 * Double(source) / 3)
         let column = min(columnCount - 1, max(0, Int(x / dx)))
         guard depths[column] > 0.035 else { return }
-        let radius = (0.002 + 0.003 * variation) * material.bubbleRadiusScale
-        let y = height - depths[column] * (0.18 + 0.7 * variation)
-        bubbles.append(Bubble(position: SIMD2(x, y), velocity: SIMD2(0, -0.10 - radius * 14),
-            radius: radius, age: 0, lifetime: 1.8 + variation, phase: phase))
+        let radius = (0.004 + 0.004 * variation) * material.bubbleRadiusScale
+        let y = height - radius * 2 - 0.006
+        let riseSpeed = 0.18 + radius * 16
+        // 深い場所でも途中で消えず水面まで上がれる時間を確保する。
+        bubbles.append(Bubble(position: SIMD2(x, y), velocity: SIMD2(0, -riseSpeed),
+            radius: radius, age: 0, lifetime: depths[column] / riseSpeed + 0.6,
+            phase: phase, isCarbonated: true))
     }
 
     /// 最初は下へ巻き込まれ、抵抗と浮力の近似で上昇する。合体・分裂・水への反作用は解かない。
@@ -352,8 +357,14 @@ final class WaterModel {
             let column = min(columnCount - 1, max(0, Int(bubble.position.x / dx)))
             guard depths[column] > bubble.radius * 3 else { continue }
             let waterSpeed = depths[column] > dryDepth ? momentum[column] / depths[column] : 0
-            let target = SIMD2(waterSpeed * 0.15 + sin(bubble.age * 8 + bubble.phase) * 0.035,
+            let target: SIMD2<Double>
+            if bubble.isCarbonated {
+                target = SIMD2(waterSpeed * 0.05 + sin(bubble.age * 5 + bubble.phase) * 0.008,
+                               -0.18 - bubble.radius * 16)
+            } else {
+                target = SIMD2(waterSpeed * 0.15 + sin(bubble.age * 8 + bubble.phase) * 0.035,
                                -0.10 - bubble.radius * 14)
+            }
             bubble.velocity += (target - bubble.velocity) * (1 - exp(-4 * dt))
             bubble.position += bubble.velocity * dt
             bubble.position.x = min(width - bubble.radius, max(bubble.radius, bubble.position.x))
@@ -374,12 +385,14 @@ final class WaterModel {
         vertices.reserveCapacity(bubbles.count * 6)
         for bubble in bubbles {
             let fade = min(1, bubble.age / 0.10, (bubble.lifetime - bubble.age) / 0.3)
+            // 炭酸の泡には画面幅の0.9%の最小直径を与え、小さな点へ潰れるのを防ぐ。
+            let radius = bubble.isCarbonated ? max(bubble.radius, width * 0.0045) : bubble.radius
             for corner in corners {
-                let point = bubble.position + corner * bubble.radius
+                let point = bubble.position + corner * radius
                 vertices.append(BubbleVertex(
                     position: normalizedPosition(point),
                     texture: SIMD2(Float(corner.x), Float(-corner.y)),
-                    appearance: SIMD4(Float(fade), 0, 0, 0)))
+                    appearance: SIMD4(Float(fade), bubble.isCarbonated ? 1 : 0, 0, 0)))
             }
         }
         return vertices

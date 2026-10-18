@@ -146,13 +146,14 @@ fragment half4 splashFragment(WaterRaster in [[stage_in]], constant WaterUniform
 
 // 気泡用の頂点は、水面に対する位置も渡して輪郭を水中へクリップする。
 struct BubbleVertex { float2 position; float2 texture; float4 appearance; };
-struct BubbleRaster { float4 position [[position]]; float2 uv; float2 waterUV; float opacity; };
+struct BubbleRaster { float4 position [[position]]; float2 uv; float2 waterUV; float opacity; float carbonation; };
 vertex BubbleRaster bubbleVertex(uint id [[vertex_id]], device const BubbleVertex *vertices [[buffer(0)]]) {
     BubbleRaster result;
     result.position = float4(vertices[id].position * 2 - 1, 0, 1);
     result.uv = vertices[id].texture;
     result.waterUV = vertices[id].position;
     result.opacity = vertices[id].appearance.x;
+    result.carbonation = vertices[id].appearance.y;
     return result;
 }
 
@@ -163,12 +164,17 @@ fragment half4 bubbleFragment(BubbleRaster in [[stage_in]],
     float surface = visibleSurface(in.waterUV.x, s, heights);
     if (in.waterUV.y >= surface || s.viewport.z <= 0) return half4(0);
     float radius = length(in.uv);
-    float edgeWidth = max(0.10f, fwidth(radius));
+    float emphasis = clamp(in.carbonation, 0.0f, 1.0f);
+    float edgeWidth = max(mix(0.10f, 0.16f, emphasis), fwidth(radius));
     float ring = exp(-pow((radius - 0.78f) / edgeWidth, 2.0f));
     float glint = exp(-dot(in.uv - float2(-0.3f, 0.4f), in.uv - float2(-0.3f, 0.4f)) * 28);
     float coverage = 1 - smoothstep(0.92f, 1.0f, radius);
     float3 color = mix(s.deepColor.rgb, float3(0.85f,0.98f,1.0f),
                        clamp(0.5f + in.uv.y * 0.5f + glint, 0.0f, 1.0f));
-    float alpha = coverage * (ring * 0.65f + glint * 0.55f) * in.opacity * s.viewport.z;
+    // 炭酸の輪郭はやや強く出す。不透明度0では気泡も完全に消す。
+    float fluidOpacity = mix(s.viewport.z, 1 - pow(1 - s.viewport.z, 1.8f), emphasis);
+    float shapeOpacity = mix(ring * 0.65f + glint * 0.55f,
+                             min(1.0f, ring * 0.95f + glint * 0.80f), emphasis);
+    float alpha = coverage * shapeOpacity * in.opacity * fluidOpacity;
     return premultipliedColor(color, alpha);
 }

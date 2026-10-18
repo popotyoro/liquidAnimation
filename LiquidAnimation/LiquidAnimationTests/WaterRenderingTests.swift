@@ -143,6 +143,31 @@ struct WaterRenderingTests {
         #expect(scene.fluid.model.fraction == fraction)
     }
 
+    @Test("炭酸の泡は注水後も見分けられる大きさとコントラストで描く", arguments: [FluidKind.beer, .sparklingWater])
+    func carbonationHasVisibleOutlines(kind: FluidKind) throws {
+        let scene = try OffscreenWater(kind: kind)
+        scene.advance(frames: 600)
+        let bubbles = scene.fluid.model.bubbleVertices()
+        try #require(!bubbles.isEmpty)
+        // 400px幅の描画で、フェード中の泡も直径3px以上の領域を確保する。
+        for start in stride(from: 0, to: bubbles.count, by: 6) {
+            let diameter = abs(bubbles[start + 1].position.x - bubbles[start].position.x) * 400
+            #expect(diameter >= 3)
+        }
+        let withBubbles = try scene.render()
+        let withoutBubbles = try scene.render(hidesBubbles: true)
+        // 白い背景へ合成したときも、泡の有無で5%以上違う画素が十分にある。
+        let visiblePixels = stride(from: 0, to: withBubbles.pixels.count, by: 4).filter { i in
+            (0..<3).contains { channel in
+                let a = Int(withBubbles.pixels[i + channel]) + 255 - Int(withBubbles.pixels[i + 3])
+                let b = Int(withoutBubbles.pixels[i + channel]) + 255 - Int(withoutBubbles.pixels[i + 3])
+                return abs(a - b) >= 13
+            }
+        }.count
+        #expect(visiblePixels >= 150)
+        try withBubbles.save(frame: 600, prefix: kind.rawValue)
+    }
+
 }
 
 /// 本番の転送・描画処理を、背景が透明なテクスチャへ実行するテスト用の場。
@@ -178,8 +203,12 @@ private final class OffscreenWater {
         for _ in 0..<frames { fluid.model.advance(by: 1 / 60) }
     }
 
-    func render(opacity: Double = 0.45, color: FluidColorChoice = .standard) throws -> RenderedWater {
+    func render(opacity: Double = 0.45, color: FluidColorChoice = .standard, hidesBubbles: Bool = false) throws -> RenderedWater {
         fluid.uploadSurface()
+        if hidesBubbles {
+            let vertices = fluid.bubbleBuffer.contents().bindMemory(to: BubbleVertex.self, capacity: fluid.bubbleVertexCount)
+            for i in 0..<fluid.bubbleVertexCount { vertices[i].appearance.x = 0 }
+        }
         let command = try #require(queue.makeCommandBuffer())
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target

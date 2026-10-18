@@ -7,5 +7,6 @@ extension WaterModel {
         var age: Double
         var lifetime: Double
         var phase: Double
+        var isCarbonated = false
     }
 }
