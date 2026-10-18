@@ -141,25 +141,27 @@ Metalでは透明な中心、明暗のある縁、小さな反射光を描く。
 
 物理計算はSwiftでCPU上に実装し、MetalはGPU上で描画を行う。現在はMetalの計算シェーダーや、MLX・Swift Numerics・Accelerateを使用していない。
 
+Fluid内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`Model/`、計算と再生制御を`Simulation/`、GPUへの転送と描画を`Rendering/`に分ける。`WaterModel`は水深などの更新を実行するため`Simulation/`に置く。下表のFluid内のパスは、このディレクトリを基準とする。
+
 | 担当箇所 | 責務 |
 | --- | --- |
 | `ContentView.swift` / SwiftUI | 背景画面、設定、注水・停止・リセットの操作 |
-| `FluidConfiguration.swift` | 注水設定と範囲補正 |
-| `FluidControls.swift` | 操作要求と表示用の状態・計測値 |
-| `PourEmission.swift`・`GaussianFootprint.swift` | 注水曲線と積分、格子上のガウス分布と正規化 |
-| `WaterModel.swift` | 投入量、落下軌道、水深・運動量・着水圧力、描画用メッシュの生成 |
-| `WaterModel+Drop.swift`・`WaterModel+Bubble.swift`・`WaterModel+Parcel.swift`・`WaterModel+StreamProfile.swift` | 水滴・気泡・水流区間・描画輪郭のデータ型。`WaterModel`内の名前空間を保つ |
-| `FluidSimulation.swift` | 物理モデルと共有バッファの所有、GPUへの転送 |
-| `WaterVertex.swift`・`BubbleVertex.swift`・`WaterUniforms.swift` | SwiftとMetalで共有するデータの配置 |
-| `View+LiquidOverlay.swift`・`LiquidOverlayModifier.swift` | SwiftUIからの入口とレイヤーの配置 |
-| `LiquidOverlay.swift` | `UIViewRepresentable`による`MTKView`の生成とライフサイクル |
-| `FluidPlayback.swift` | 操作要求の消費、一時停止・再開、フレーム時間の制限 |
-| `LiquidRenderer.swift` | リサイズ、GPUフレーム管理、完了通知、計測報告 |
-| `WaterRenderPipelines.swift` | Metalの合成設定と描画順。アプリとオフスクリーン検証で共用 |
-| `FluidError.swift` | Metal初期化・描画のエラー情報 |
-| `Fluid.metal` | 色、不透明度、輪郭、ハイライト、気泡の縁、水中模様の描画 |
+| `Model/FluidConfiguration.swift` | 注水設定と範囲補正 |
+| `Model/FluidControls.swift` | 操作要求と表示用の状態・計測値 |
+| `Simulation/PourEmission.swift`・`Simulation/GaussianFootprint.swift` | 注水曲線と積分、格子上のガウス分布と正規化 |
+| `Simulation/WaterModel.swift` | 投入量、落下軌道、水深・運動量・着水圧力、描画用メッシュの生成 |
+| `Model/WaterModel+Drop.swift`・`Model/WaterModel+Bubble.swift`・`Model/WaterModel+Parcel.swift`・`Model/WaterModel+StreamProfile.swift` | 水滴・気泡・水流区間・描画輪郭のデータ型。`WaterModel`内の名前空間を保つ |
+| `Rendering/FluidSimulation.swift` | 物理モデルと共有バッファの所有、GPUへの転送 |
+| `Rendering/WaterVertex.swift`・`Rendering/BubbleVertex.swift`・`Rendering/WaterUniforms.swift` | SwiftとMetalで共有するデータの配置 |
+| `View/View+LiquidOverlay.swift`・`View/LiquidOverlayModifier.swift` | SwiftUIからの入口とレイヤーの配置 |
+| `View/LiquidOverlay.swift` | `UIViewRepresentable`による`MTKView`の生成とライフサイクル |
+| `Simulation/FluidPlayback.swift` | 操作要求の消費、一時停止・再開、フレーム時間の制限 |
+| `Rendering/LiquidRenderer.swift` | リサイズ、GPUフレーム管理、完了通知、計測報告 |
+| `Rendering/WaterRenderPipelines.swift` | Metalの合成設定と描画順。アプリとオフスクリーン検証で共用 |
+| `Rendering/FluidError.swift` | Metal初期化・描画のエラー情報 |
+| `Rendering/Fluid.metal` | 色、不透明度、輪郭、ハイライト、気泡の縁、水中模様の描画 |
 
-色や光沢の変更は主に`Fluid.metal`、水流の形状はSwift側の描画データ生成、粘りや波など動きの変更は物理モデルで扱う。現在の色と光沢は水向けの固定値で、液体の種類や色を選ぶ設定はない。
+色や光沢の変更は主に`Rendering/Fluid.metal`、水流の形状はSwift側の描画データ生成、粘りや波など動きの変更は物理モデルで扱う。現在の色と光沢は水向けの固定値で、液体の種類や色を選ぶ設定はない。
 
 水面には細い明るい縁と、その下へ減衰する幅のある反射光を描く。左上に広い光源があると仮定し、水面の傾きで反射の強さを変える。水中には広い淡い濃淡、水流には断面方向の陰影と細い光沢、水滴には局所的な反射光を加える。いずれも描画上の近似で、背景の反射・屈折や光の物理計算は行わない。不透明度と液量は変更せず、追加の描画パスやテクスチャは使用しない。
 

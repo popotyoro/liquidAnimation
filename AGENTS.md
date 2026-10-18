@@ -6,7 +6,10 @@ SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iO
 
 - `LiquidAnimation/LiquidAnimation.xcodeproj`：Xcode プロジェクト。
 - `LiquidAnimation/LiquidAnimation/ContentView.swift`：試作画面と設定 UI。
-- `LiquidAnimation/LiquidAnimation/Fluid/`：設定モデル、浅水ソルバー、Metal の計算・描画、SwiftUI への組み込み。
+- `LiquidAnimation/LiquidAnimation/Fluid/View/`：SwiftUIの入口、modifier、`MTKView`の組み込み。
+- `LiquidAnimation/LiquidAnimation/Fluid/Model/`：設定・操作状態、水滴・気泡などのデータ型。
+- `LiquidAnimation/LiquidAnimation/Fluid/Simulation/`：浅水モデル、注水曲線、数式、再生制御。
+- `LiquidAnimation/LiquidAnimation/Fluid/Rendering/`：Metal描画、共有バッファ、頂点・定数、描画エラー。
 - `LiquidAnimation/LiquidAnimation/Assets.xcassets`：色とアプリアイコン。
 
 ## ビルド・実行は Xcode MCP を使う
