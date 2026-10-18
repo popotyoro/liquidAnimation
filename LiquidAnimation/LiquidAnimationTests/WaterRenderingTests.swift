@@ -89,6 +89,10 @@ struct WaterRenderingTests {
             if frame == 480 {
                 #expect(pixels[(height / 4 * width + width / 2) * 4 + 3] == 0)
                 #expect(abs(Int(pixels[(height * 3 / 4 * width + width / 2) * 4 + 3]) - 115) <= 1)
+                // 静止後も壁際だけが少し持ち上がり、中央の水位はほぼ50%に保たれる。
+                let aboveSurface = height / 2 - 2
+                #expect(pixels[(aboveSurface * width + 2) * 4 + 3] > 100)
+                #expect(pixels[(aboveSurface * width + width / 2) * 4 + 3] == 0)
             }
             let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))
             let image = try #require(CGImage(width: width, height: height, bitsPerComponent: 8,
