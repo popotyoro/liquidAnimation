@@ -45,7 +45,7 @@ struct FluidSettingsView: View {
         }
     }
 
-    private func setting(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
+    private func setting(_ title: LocalizedStringKey, value: Binding<Double>, range: ClosedRange<Double>,
                          unit: String, scale: Double = 1) -> some View {
         VStack(alignment: .leading) {
             HStack {

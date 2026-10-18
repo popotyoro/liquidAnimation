@@ -21,11 +21,13 @@ final class WaterModel {
     private(set) var landedArea = 0.0
     private(set) var time = 0.0
     /// 着水済みの量のうち、泡の膜に保持される液体（m²）。landedAreaの内数。
-    private(set) var foamLiquidArea = 0.0
+    var foamLiquidArea: Double { foam.liquidArea }
     /// 液中に巻き込まれた微細気泡の白濁度。0〜1の描画用近似。
-    private(set) var beerCloudiness = 0.0
+    var beerCloudiness: Double { foam.cloudiness }
     /// 保持量から白濁域の厚さへ変換する表示用近似。液面の内側だけを覆う。
     var foamHeight: Double { foamLiquidArea / width / 0.40 }
+    private var foam = BeerFoam()
+    private var meshBuilder: WaterParticleMeshBuilder { .init(width: width, height: height) }
     private var parcels: [Parcel] = []
     static let maximumDrops = 96
 
@@ -111,8 +113,7 @@ final class WaterModel {
         emittedArea = 0
         landedArea = 0
         time = 0
-        foamLiquidArea = 0
-        beerCloudiness = 0
+        foam = BeerFoam()
         parcels.removeAll(keepingCapacity: true)
         drops.removeAll(keepingCapacity: true)
         attemptedTailSeparation = false
@@ -157,18 +158,9 @@ final class WaterModel {
         preserveVolume()
     }
 
-    /// 注ぎ始めは90%を泡に保持し、たまるにつれて12%へ下げる。
-    /// 6秒の時定数で排液し、下の液体へ戻す。係数は見た目のための近似。
     private func updateFoam(dt: Double, arrivingArea: Double) {
         guard configuration.kind == .beer else { return }
-        let foamingFraction = 0.12 + 0.78 * exp(-landedFraction / 0.08)
-        foamLiquidArea = min(landedArea,
-            foamLiquidArea * exp(-dt / 6) + arrivingArea * foamingFraction)
-        // 着水で白濁し、注水を止めると微細気泡の浮上を近似して透明に戻す。
-        // 更新間隔に依存しない指数応答。液体の体積・運動量は変えない。
-        let clearing = beerCloudiness * exp(-dt / 2.4)
-        let entrainment = 1 - exp(-arrivingArea / (capacity * 0.025))
-        beerCloudiness = clearing + (1 - clearing) * entrainment
+        foam.advance(by: dt, arrivingArea: arrivingArea, landedArea: landedArea, capacity: capacity)
     }
 
     /// 波速と流速に対して、1ステップでセルを飛び越えない刻みを選ぶ。
@@ -411,49 +403,9 @@ final class WaterModel {
         bubbles = survivors
     }
 
-    /// 気泡を四角形へ展開する。輪郭と小さな反射光はMetal側で描く。
-    func bubbleVertices() -> [BubbleVertex] {
-        let corners: [SIMD2<Double>] = [SIMD2(-1,-1), SIMD2(1,-1), SIMD2(-1,1),
-                                      SIMD2(-1,1), SIMD2(1,-1), SIMD2(1,1)]
-        var vertices: [BubbleVertex] = []
-        vertices.reserveCapacity(bubbles.count * 6)
-        for bubble in bubbles {
-            let fade = min(1, bubble.age / 0.10, (bubble.lifetime - bubble.age) / 0.3)
-            // 炭酸の泡には画面幅の1.2%の最小直径を与え、小さな点へ潰れるのを防ぐ。
-            let radius = bubble.isCarbonated ? max(bubble.radius, width * 0.006) : bubble.radius
-            for corner in corners {
-                let point = bubble.position + corner * radius
-                vertices.append(BubbleVertex(
-                    position: normalizedPosition(point),
-                    texture: SIMD2(Float(corner.x), Float(-corner.y)),
-                    appearance: SIMD4(Float(fade), bubble.isCarbonated ? 1 : 0, 0, 0)))
-            }
-        }
-        return vertices
-    }
-
-    /// 飛沫を速度方向に伸ばした楕円の四角形メッシュへ変換する。
-    /// 縦横の伸縮率を逆数にして面積を保ち、輪郭はフラグメント側で切り抜く。
-    func splashVertices() -> [WaterVertex] {
-        var vertices: [WaterVertex] = []
-        vertices.reserveCapacity(drops.count * 6)
-        let corners: [SIMD2<Double>] = [SIMD2(-1,-1), SIMD2(1,-1), SIMD2(-1,1),
-                                      SIMD2(-1,1), SIMD2(1,-1), SIMD2(1,1)]
-        for drop in drops {
-            let speed = simd_length(drop.velocity)
-            let axis = speed > 0.01 ? drop.velocity / speed : SIMD2(0, 1)
-            let normal = SIMD2(axis.y, -axis.x)
-            let stretch = 1.5 + min(1.5, speed)
-            let radius = sqrt(drop.area / .pi)
-            for corner in corners {
-                let point = drop.position + normal * corner.x * radius / sqrt(stretch)
-                    + axis * corner.y * radius * sqrt(stretch)
-                vertices.append(WaterVertex(position: normalizedPosition(point),
-                                            texture: SIMD2(Float(corner.x), Float(corner.y))))
-            }
-        }
-        return vertices
-    }
+    /// 物理状態を変更せず、描画用メッシュの生成へ委ねる。
+    func bubbleVertices() -> [BubbleVertex] { meshBuilder.bubbleVertices(bubbles) }
+    func splashVertices() -> [WaterVertex] { meshBuilder.splashVertices(drops) }
 
     /// 着水の衝撃から水面を押す圧力を作る。着水が止まると目標値も0になる。
     private func updateImpactPressure(dt: Double) {
@@ -677,6 +629,6 @@ final class WaterModel {
 
     /// 物理座標（m、下向きy）を描画座標（0〜1、上向きy）へ変換する。
     private func normalizedPosition(_ point: SIMD2<Double>) -> SIMD2<Float> {
-        SIMD2(Float(point.x / width), Float(1 - point.y / height))
+        meshBuilder.normalizedPosition(point)
     }
 }

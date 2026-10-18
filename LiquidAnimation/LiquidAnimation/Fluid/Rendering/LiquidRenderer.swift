@@ -12,8 +12,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     // GPUが共有バッファを読んでいる間は書き換えない。同時実行は1フレームまで。
     private var pending = false
     private var playback = FluidPlayback()
-    private var reportTime = CACurrentMediaTime()
-    private var reportFrames = 0
+    private var frameRate = FrameRateMeter(startedAt: CACurrentMediaTime())
 
     init(controls: FluidControls) { self.controls = controls }
 
@@ -106,19 +105,14 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
                                fraction: Double, pouring: Bool, error: String?) {
         pending = false
         if let error { controls.error = error }
-        reportFrames += 1
-        let now = CACurrentMediaTime()
-        let interval = now - reportTime
         // Observationの更新は約0.5秒ごと。物理モデルの毎フレーム更新と分離する。
-        guard interval >= 0.5 else { return }
-        controls.framesPerSecond = Double(reportFrames) / interval
+        guard let rate = frameRate.recordFrame(at: CACurrentMediaTime()) else { return }
+        controls.framesPerSecond = rate
         controls.gpuMilliseconds = gpuMilliseconds
         controls.simulationMilliseconds = simulationMilliseconds
         controls.insertedFraction = fraction
         if !controls.isPaused {
             controls.status = pouring ? "注水中" : (fraction > 0 ? "注水完了・水面を計算中" : "注水して動きを確認")
         }
-        reportFrames = 0
-        reportTime = now
     }
 }

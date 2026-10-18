@@ -183,17 +183,21 @@ Fluid内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`
 | `Model/FluidKind.swift`・`Model/FluidMaterial.swift`・`Model/FluidColorChoice.swift` | 種類、内部の近似係数、色の選択 |
 | `Model/FluidControls.swift` | 操作要求と表示用の状態・計測値 |
 | `Simulation/PourEmission.swift`・`Simulation/GaussianFootprint.swift` | 注水曲線と積分、格子上のガウス分布と正規化 |
-| `Simulation/WaterModel.swift` | 投入量、落下軌道、水深・運動量・着水圧力、描画用メッシュの生成 |
+| `Simulation/WaterModel.swift` | 投入量、落下軌道、水深・運動量・着水圧力、各更新の順序と水流の断面生成 |
+| `Simulation/BeerFoam.swift` | ビールの泡に保持される液量と白濁の指数応答 |
 | `Model/WaterModel+Drop.swift`・`Model/WaterModel+Bubble.swift`・`Model/WaterModel+Parcel.swift`・`Model/WaterModel+StreamProfile.swift` | 水滴・気泡・水流区間・描画輪郭のデータ型。`WaterModel`内の名前空間を保つ |
 | `Rendering/FluidSimulation.swift` | 物理モデルと共有バッファの所有、GPUへの転送 |
+| `Rendering/WaterParticleMeshBuilder.swift` | 気泡・飛沫のメッシュ生成と物理座標から描画座標への変換 |
 | `Rendering/WaterVertex.swift`・`Rendering/BubbleVertex.swift`・`Rendering/WaterUniforms.swift` | SwiftとMetalで共有するデータの配置 |
 | `View/View+LiquidOverlay.swift`・`View/LiquidOverlayModifier.swift` | SwiftUIからの入口とレイヤーの配置 |
 | `View/LiquidOverlay.swift` | `UIViewRepresentable`による`MTKView`の生成とライフサイクル |
 | `Simulation/FluidPlayback.swift` | 操作要求の消費、一時停止・再開、フレーム時間の制限 |
 | `Rendering/LiquidRenderer.swift` | リサイズ、GPUフレーム管理、完了通知、計測報告 |
+| `Rendering/FrameRateMeter.swift` | 0.5秒ごとの完了フレーム集計。時刻は呼び出し側から渡す |
 | `Rendering/WaterRenderPipelines.swift` | Metalの合成設定と描画順。アプリとオフスクリーン検証で共用 |
 | `Rendering/FluidPalette.swift` | 種類と色から選ぶ、浅部・深部・水流の配色 |
 | `View/FluidControlBar.swift` | 注水・一時停止・リセット・設定への入口と計測表示 |
+| `View/FluidMetricsView.swift` | FPS・GPU・CPUの計測値だけを監視する表示 |
 | `View/FluidSettingsView.swift` | 種類・色・注ぎ方の設定画面 |
 | `Rendering/FluidError.swift` | Metal初期化・描画のエラー情報 |
 | `Rendering/Fluid.metal` | 色、不透明度、輪郭、ハイライト、気泡の縁、水中模様の描画 |
@@ -239,7 +243,7 @@ Swift Testingで、次の振る舞いと数値上の制約を検証する。
 | ビールの泡・白濁 | 注水後の減衰と液量保存、他の種類への非適用、一時停止・リセット、1・2・4・10・20秒の描画画像 |
 | 共有バッファ | SwiftとMetalで共有する頂点・定数のサイズとフィールド位置 |
 
-着水点の両側の盛り上がりは描画上の試作。1〜4秒と8秒の画像を出力し、変更前後を比較した。8秒では変更前と画像が一致する。ビールの泡・白濁は試作段階の近似モデル。1・2・4・10・20秒の描画画像を目視確認し、上端と液体との境界が同じ凹凸にならないことも確認した。直近のテスト実行では、iPhone 18 Proシミュレータでパラメーター展開を含む103件が成功した。注水コントロールバーの計測表示は通常文字・拡大文字の画像でも確認した。炭酸気泡のサイズ・横方向の広がり・リセット後の再現性を含めて確認済み。注水中の4種類と、開始・終了・静止後の画像を保存し、配色、水流、水面、気泡を確認した。本体のファイル整理時には6時点のPNGが整理前後で完全一致することも確認済み。テストビルドには、テストホストの依存関係を自動解決できない既知の警告が残っている。
+着水点の両側の盛り上がりは描画上の試作。1〜4秒と8秒の画像を出力し、変更前後を比較した。8秒では変更前と画像が一致する。ビールの泡・白濁は試作段階の近似モデル。1・2・4・10・20秒の描画画像を目視確認し、上端と液体との境界が同じ凹凸にならないことも確認した。直近のテスト実行では、iPhone 18 Proシミュレータでパラメーター展開を含む116件が成功した。注水コントロールバーの計測表示は通常文字・拡大文字の画像でも確認した。炭酸気泡のサイズ・横方向の広がり・リセット後の再現性を含めて確認済み。注水中の4種類と、開始・終了・静止後の画像を保存し、配色、水流、水面、気泡を確認した。本体のファイル整理時には6時点のPNGが整理前後で完全一致することも確認済み。テストビルドには、テストホストの依存関係を自動解決できない既知の警告が残っている。
 
 ### 実機で確認する項目
 

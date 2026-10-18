@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 注水の操作と、動作中に確認する計測値をまとめる。
 struct FluidControlBar: View {
-    @Bindable var controls: FluidControls
+    let controls: FluidControls
     let openSettings: () -> Void
 
     var body: some View {
@@ -30,32 +30,9 @@ struct FluidControlBar: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 16) {
-                    metric("描画", value: "\(controls.framesPerSecond, specifier: "%.0f") fps")
-                    metric("GPU", value: "\(controls.gpuMilliseconds, specifier: "%.1f") ms")
-                    metric("CPU", value: "\(controls.simulationMilliseconds, specifier: "%.1f") ms")
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    metric("描画", value: "\(controls.framesPerSecond, specifier: "%.0f") fps")
-                    metric("GPU", value: "\(controls.gpuMilliseconds, specifier: "%.1f") ms")
-                    metric("CPU", value: "\(controls.simulationMilliseconds, specifier: "%.1f") ms")
-                }
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            FluidMetricsView(controls: controls)
         }
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-    }
-
-    private func metric(_ title: LocalizedStringKey, value: LocalizedStringKey) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-            Text(value)
-        }
-        .fixedSize()
-        .accessibilityElement(children: .combine)
     }
 }
