@@ -330,21 +330,29 @@ final class WaterModel {
         lastCarbonationTime = time
         guard bubbles.count < Self.maximumBubbles else { return }
         carbonationSequence += 1
-        // 確定的な分布で発生点を散らす。乱数状態や毎フレームの追加配列は持たない。
-        let phase = Double(carbonationSequence) * 2.399
-        let variation = 0.5 + 0.5 * sin(phase)
-        // 4か所から繰り返し出し、ばらばらの点ではなく上昇する泡の列として見せる。
-        let source = (carbonationSequence - 1) % 4
-        let x = width * (0.16 + 0.68 * Double(source) / 3)
+        // 発生点・大きさ・揺れの位相を独立した疑似乱数で散らす。
+        // 同じ注水条件では同じ並びになり、見た目の比較を再現できる。
+        let variation = carbonationSample(channel: 1)
+        let phase = carbonationSample(channel: 2) * 2 * .pi
+        let x = width * (0.08 + 0.84 * carbonationSample(channel: 0))
         let column = min(columnCount - 1, max(0, Int(x / dx)))
         guard depths[column] > 0.035 else { return }
-        let radius = (0.004 + 0.004 * variation) * material.bubbleRadiusScale
-        let y = height - radius * 2 - 0.006
+        let radius = (0.005 + 0.005 * variation) * material.bubbleRadiusScale
+        let y = height - radius * 2 - (0.004 + 0.012 * carbonationSample(channel: 3))
         let riseSpeed = 0.18 + radius * 16
         // 深い場所でも途中で消えず水面まで上がれる時間を確保する。
         bubbles.append(Bubble(position: SIMD2(x, y), velocity: SIMD2(0, -riseSpeed),
             radius: radius, age: 0, lifetime: depths[column] / riseSpeed + 0.6,
             phase: phase, isCarbonated: true))
+    }
+
+    /// 発生番号と用途から0以上1未満の値を作る。状態を持たないSplitMix64の混合。
+    private func carbonationSample(channel: UInt64) -> Double {
+        var value = UInt64(carbonationSequence) &+ (channel &+ 1) &* 0x9E3779B97F4A7C15
+        value = (value ^ (value >> 30)) &* 0xBF58476D1CE4E5B9
+        value = (value ^ (value >> 27)) &* 0x94D049BB133111EB
+        value ^= value >> 31
+        return Double(value >> 11) / 9_007_199_254_740_992
     }
 
     /// 最初は下へ巻き込まれ、抵抗と浮力の近似で上昇する。合体・分裂・水への反作用は解かない。
@@ -385,8 +393,8 @@ final class WaterModel {
         vertices.reserveCapacity(bubbles.count * 6)
         for bubble in bubbles {
             let fade = min(1, bubble.age / 0.10, (bubble.lifetime - bubble.age) / 0.3)
-            // 炭酸の泡には画面幅の0.9%の最小直径を与え、小さな点へ潰れるのを防ぐ。
-            let radius = bubble.isCarbonated ? max(bubble.radius, width * 0.0045) : bubble.radius
+            // 炭酸の泡には画面幅の1.2%の最小直径を与え、小さな点へ潰れるのを防ぐ。
+            let radius = bubble.isCarbonated ? max(bubble.radius, width * 0.006) : bubble.radius
             for corner in corners {
                 let point = bubble.position + corner * radius
                 vertices.append(BubbleVertex(

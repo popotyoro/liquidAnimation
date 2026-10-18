@@ -35,6 +35,38 @@ struct FluidPresetTests {
         #expect(water.bubbleCount == 0)
     }
 
+    @Test("注水後の炭酸気泡は固定の列に偏らず容器の幅に広がる", arguments: [FluidKind.beer, .sparklingWater])
+    func carbonationSpreadsAcrossContainer(kind: FluidKind) throws {
+        let water = makeWater(kind: kind)
+        for _ in 0..<600 { water.advance(by: 1 / 60) }
+
+        let vertices = water.bubbleVertices()
+        let centers = stride(from: 0, to: vertices.count, by: 6).map {
+            (vertices[$0].position.x + vertices[$0 + 5].position.x) / 2
+        }
+        let minimum = try #require(centers.min())
+        let maximum = try #require(centers.max())
+        #expect(maximum - minimum > 0.5)
+        #expect(centers.allSatisfy { $0 >= 0 && $0 <= 1 })
+        // 幅を8区間に分け、以前の4列では満たせない広がりを確認する。
+        #expect(Set(centers.map { Int($0 * 8) }).count >= 6)
+    }
+
+    @Test("同じ設定でリセットして注ぎ直すと炭酸気泡のばらつきを再現する", arguments: [FluidKind.beer, .sparklingWater])
+    func carbonationRepeatsAfterReset(kind: FluidKind) {
+        let water = makeWater(kind: kind)
+        for _ in 0..<600 { water.advance(by: 1 / 60) }
+        let original = water.bubbleVertices()
+        #expect(!original.isEmpty)
+
+        water.reset(configuration: water.configuration, start: true)
+        for _ in 0..<600 { water.advance(by: 1 / 60) }
+        let repeated = water.bubbleVertices()
+
+        #expect(repeated.map(\.position) == original.map(\.position))
+        #expect(repeated.map(\.appearance) == original.map(\.appearance))
+    }
+
     @Test("粘度のある水は通常の水より着水後の波と飛沫を抑える")
     func viscousPresetReducesWavesAndSpray() {
         let water = makeWater(kind: .water)

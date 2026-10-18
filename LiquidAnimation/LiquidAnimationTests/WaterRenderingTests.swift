@@ -149,10 +149,10 @@ struct WaterRenderingTests {
         scene.advance(frames: 600)
         let bubbles = scene.fluid.model.bubbleVertices()
         try #require(!bubbles.isEmpty)
-        // 400px幅の描画で、フェード中の泡も直径3px以上の領域を確保する。
+        // 400px幅の描画で、フェード中の泡も直径4.5px以上の領域を確保する。
         for start in stride(from: 0, to: bubbles.count, by: 6) {
             let diameter = abs(bubbles[start + 1].position.x - bubbles[start].position.x) * 400
-            #expect(diameter >= 3)
+            #expect(diameter >= 4.5)
         }
         let withBubbles = try scene.render()
         let withoutBubbles = try scene.render(hidesBubbles: true)
