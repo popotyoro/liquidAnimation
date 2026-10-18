@@ -50,10 +50,11 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
             // 停止中も転送・描画して、不透明度などの表示設定を反映する。
             simulation.uploadSurface()
             let simulationMS = (CACurrentMediaTime() - simulationStart) * 1_000
+            let uniforms = makeUniforms(size: view.drawableSize, model: simulation.model)
+            try pipelines.prepareSurface(simulation, command: command, uniforms: uniforms)
             guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else {
                 throw FluidError.unavailable("液体の描画コマンドを作成できませんでした。")
             }
-            let uniforms = makeUniforms(size: view.drawableSize, model: simulation.model)
             pipelines.encode(simulation, with: encoder, uniforms: uniforms)
             encoder.endEncoding()
             command.present(drawable)

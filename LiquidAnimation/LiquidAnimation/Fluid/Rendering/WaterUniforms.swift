@@ -6,7 +6,7 @@ nonisolated struct WaterUniforms: Sendable {
     var deepColor: SIMD4<Float>
     var streamColor: SIMD4<Float>
     var edgeColor: SIMD4<Float>
-    var foam: SIMD4<Float> = .zero // x: 幅基準の泡の厚さ、y: 白濁度、z: 高さ基準の平均液深。
+    var foam: SIMD4<Float> = .zero // x: 泡の厚さ、y: 白濁度、z: 平均液深、w: 表示水面のサンプル数。
 
     init(viewport: SIMD4<Float>, detail: SIMD4<Float> = .zero, palette: FluidPalette = .blue) {
         self.viewport = viewport

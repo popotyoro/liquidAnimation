@@ -241,9 +241,10 @@ private final class OffscreenWater {
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
-        let encoder = try #require(command.makeRenderCommandEncoder(descriptor: pass))
         let uniforms = WaterUniforms(viewport: SIMD4(Float(width), Float(height), Float(opacity),
             Float(fluid.model.columnCount)), detail: fluid.model.visualDetails, palette: color.palette(for: fluid.model.configuration.kind))
+        try pipelines.prepareSurface(fluid, command: command, uniforms: uniforms)
+        let encoder = try #require(command.makeRenderCommandEncoder(descriptor: pass))
         pipelines.encode(fluid, with: encoder, uniforms: uniforms)
         encoder.endEncoding()
         command.commit()

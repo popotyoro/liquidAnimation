@@ -20,6 +20,8 @@ SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iO
 2. `XcodeListSchemes` と `XcodeListRunDestinations` で `LiquidAnimation` スキームと iOS の実行先を確認する。
 3. `BuildProject` でビルドし、`RunProject` で実行する。必要に応じて `GetBuildLog` と `GetConsoleOutput` で原因を調べる。
 
+Metalの処理・起動方式を変更した場合は、描画テストに加えて通常起動後の`GetConsoleOutput`とデバッガの`process status`を確認する。`RunProject`の起動成功だけで検証を終えず、Metal検証エラーによる停止がなく実行を継続していることを確かめる。
+
 設定の確認・変更には `GetTargetBuildSettings` と `UpdateTargetBuildSetting` を使う。`project.pbxproj` を直接編集しない。Metal ツールチェーンなどの環境不足は報告し、無断で別のビルド方式へ切り替えない。
 
 本体変更後にテストを実行する際は、先に `LiquidAnimation` スキームで `BuildProject` を実行し、続いて `LiquidAnimationTests` スキームでテストする。現在のテストホストの依存関係は自動解決されず、テストだけの実行では古い本体を参照し得る。

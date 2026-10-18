@@ -79,7 +79,7 @@ float foamSurfaceInset(float x, float time, float thickness, float depth) {
 
 // 表示用の水面。壁際のメニスカスと、着水中だけの細かい波を重ねる。
 // 液量の計算には使わない。空・満水では変形を消し、画面外へ水を増やさない。
-float visibleSurface(float x, constant WaterUniforms &s, device const float *heights) {
+float calculatedSurfaceHeight(float x, constant WaterUniforms &s, device const float *heights) {
     uint count = uint(s.viewport.w);
     float coordinate = clamp(x * float(count) - 0.5f, 0.0f, float(count - 1));
     uint left = uint(coordinate), right = min(left + 1, count - 1);
@@ -107,8 +107,27 @@ float waterSurfaceSlope(float x, constant WaterUniforms &s, device const float *
     float sampleStep = 1.0f / s.viewport.w;
     float sampleLeft = max(0.0f, x - sampleStep);
     float sampleRight = min(1.0f, x + sampleStep);
-    return (visibleSurface(sampleRight, s, heights) - visibleSurface(sampleLeft, s, heights))
+    return (calculatedSurfaceHeight(sampleRight, s, heights) - calculatedSurfaceHeight(sampleLeft, s, heights))
         * s.detail.w / max(sampleRight - sampleLeft, sampleStep);
+}
+
+// 表示水面と同じ有限差分の傾きを、横一列につき一度だけ計算する。
+// 物理格子の更新はCPUのまま。これは描画用の形状キャッシュ。
+kernel void prepareWaterSurface(uint index [[thread_position_in_grid]],
+                                constant WaterUniforms &s [[buffer(0)]],
+                                device const float *heights [[buffer(1)]],
+                                device float2 *samples [[buffer(2)]]) {
+    uint count = uint(s.foam.w);
+    if (index >= count) return;
+    float x = (float(index) + 0.5f) / float(count);
+    samples[index] = float2(calculatedSurfaceHeight(x, s, heights), waterSurfaceSlope(x, s, heights));
+}
+
+float2 sampledSurface(float x, constant WaterUniforms &s, device const float2 *samples) {
+    uint count = uint(s.foam.w);
+    float coordinate = clamp(x * float(count) - 0.5f, 0.0f, float(count - 1));
+    uint left = uint(coordinate), right = min(left + 1, count - 1);
+    return mix(samples[left], samples[right], fract(coordinate));
 }
 
 // 反射と縁の丸み。水の色や着水模様とは独立した、装飾的なライティング。
@@ -146,8 +165,9 @@ float3 roundedWaterColor(float roundness, float highlight, constant WaterUniform
 // 列ごとの水位を補間し、水面より下だけを半透明に着色する。
 fragment half4 waterFragment(WaterRaster in [[stage_in]],
                              constant WaterUniforms &s [[buffer(0)]],
-                             device const float *heights [[buffer(1)]]) {
-    float surface = visibleSurface(in.uv.x, s, heights);
+                             device const float2 *surfaceSamples [[buffer(1)]]) {
+    float2 sample = sampledSurface(in.uv.x, s, surfaceSamples);
+    float surface = sample.x;
     if (surface <= 1e-7f || s.viewport.z <= 0) return half4(0);
     // 水面までの距離をピクセル単位にし、境界を約1ピクセル幅で滑らかにする。
     float distance = (surface - in.uv.y) * s.viewport.y;
@@ -155,7 +175,7 @@ fragment half4 waterFragment(WaterRaster in [[stage_in]],
     if (coverage <= 0) return half4(0);
     float depth = clamp(surface - in.uv.y, 0.0f, 1.0f);
     float3 color = mix(s.shallowColor.rgb, s.deepColor.rgb, min(1.0f, depth * 1.5f));
-    float slope = waterSurfaceSlope(in.uv.x, s, heights);
+    float slope = sample.y;
     color = surfaceLighting(color, in.uv.x, depth, distance, slope, s);
     // 広い光の濃淡で単色の面を和らげる。細かな模様や常時動く疑似的な渦は加えない。
     color *= 0.94f + 0.09f * exp(-pow((in.uv.x - 0.3f + depth * 0.4f) / 0.5f, 2.0f));
@@ -187,10 +207,10 @@ float foamCellDistance(float2 point) {
 // 液面より上への膨張は描かない。
 fragment half4 foamFragment(WaterRaster in [[stage_in]],
                             constant WaterUniforms &s [[buffer(0)]],
-                            device const float *heights [[buffer(1)]]) {
+                            device const float2 *surfaceSamples [[buffer(1)]]) {
     float thickness = s.foam.x;
     if (thickness <= 0 || s.viewport.z <= 0) return half4(0);
-    float surface = visibleSurface(in.uv.x, s, heights);
+    float surface = sampledSurface(in.uv.x, s, surfaceSamples).x;
     if (surface <= 1e-7f) return half4(0);
     float aspect = max(s.detail.w, 0.5f);
     float aboveSurface = (in.uv.y - surface) * aspect;
@@ -269,8 +289,8 @@ vertex BubbleRaster bubbleVertex(uint id [[vertex_id]], device const BubbleVerte
 // 中心をほぼ透明にし、明暗のある縁と反射光で空気の気泡を表す。
 fragment half4 bubbleFragment(BubbleRaster in [[stage_in]],
                               constant WaterUniforms &s [[buffer(0)]],
-                              device const float *heights [[buffer(1)]]) {
-    float surface = visibleSurface(in.waterUV.x, s, heights);
+                              device const float2 *surfaceSamples [[buffer(1)]]) {
+    float surface = sampledSurface(in.waterUV.x, s, surfaceSamples).x;
     if (in.waterUV.y >= surface || s.viewport.z <= 0) return half4(0);
     float radius = length(in.uv);
     float emphasis = clamp(in.carbonation, 0.0f, 1.0f);

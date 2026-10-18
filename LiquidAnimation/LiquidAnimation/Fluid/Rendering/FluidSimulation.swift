@@ -6,6 +6,9 @@ import Metal
 final class FluidSimulation {
     let model: WaterModel
     let surfaceBuffer: any MTLBuffer
+    /// GPUが横一列だけ計算した表示水面と傾き。物理計算の格子数とは独立。
+    static let maximumSurfaceSamples = 4096
+    let surfaceSamplesBuffer: any MTLBuffer
     let streamBuffer: any MTLBuffer
     let splashBuffer: any MTLBuffer
     let bubbleBuffer: any MTLBuffer
@@ -17,6 +20,8 @@ final class FluidSimulation {
         model = WaterModel(aspectRatio: aspectRatio)
         guard let surface = device.makeBuffer(length: model.columnCount * MemoryLayout<Float>.stride,
                                               options: .storageModeShared),
+              let samples = device.makeBuffer(length: Self.maximumSurfaceSamples * MemoryLayout<SIMD2<Float>>.stride,
+                                               options: .storageModePrivate),
               let stream = device.makeBuffer(length: WaterModel.maximumStreamVertices * MemoryLayout<WaterVertex>.stride,
                                              options: .storageModeShared),
               let splash = device.makeBuffer(length: WaterModel.maximumDrops * 6 * MemoryLayout<WaterVertex>.stride,
@@ -26,6 +31,7 @@ final class FluidSimulation {
             throw FluidError.unavailable("水面の描画メモリを確保できませんでした。")
         }
         surfaceBuffer = surface
+        surfaceSamplesBuffer = samples
         streamBuffer = stream
         splashBuffer = splash
         bubbleBuffer = bubbles

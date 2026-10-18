@@ -88,6 +88,7 @@ final class WaterModel {
     }
     private var dx: Double { width / Double(columnCount) }
     private var angle: Double { configuration.angle * .pi / 180 }
+    private var inletVelocity = SIMD2(0.0, 1.6)
 
     /// 幅0.75mを基準に、表示領域の縦横比から容器の高さを決める。
     init(aspectRatio: Double, columnCount: Int = 128) {
@@ -105,6 +106,7 @@ final class WaterModel {
     func reset(configuration: FluidConfiguration, start: Bool) {
         self.configuration = configuration.sanitized
         material = self.configuration.kind.material
+        inletVelocity = SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle))
         targetArea = start ? self.configuration.fill * capacity : 0
         emittedArea = 0
         landedArea = 0
@@ -190,8 +192,8 @@ final class WaterModel {
     /// 初速と重力から水流の中心軌道を求める。壁ではxを固定して下へ流す。
     /// 負のageは入口を画面外へ延ばす描画用で、上流へ直線的に延長する。
     private func flightPosition(age: Double) -> SIMD2<Double> {
-        let x = configuration.sourcePosition * width + inletSpeed * sin(angle) * age
-        let y = inletSpeed * cos(angle) * age + 0.5 * gravity * max(0, age) * max(0, age)
+        let x = configuration.sourcePosition * width + inletVelocity.x * age
+        let y = inletVelocity.y * age + 0.5 * gravity * max(0, age) * max(0, age)
         return SIMD2(min(max(x, 0.002), width - 0.002), y)
     }
 
@@ -210,7 +212,7 @@ final class WaterModel {
                 survivors.append(parcel)
                 continue
             }
-            let impactSpeed = inletSpeed * cos(angle) + gravity * age
+            let impactSpeed = inletVelocity.y + gravity * age
             if collisionDepths[column] > 0.035, time - lastBubbleTime >= material.entrainmentInterval,
                emissionRate(at: parcel.time) > nominalRate * 0.05 {
                 spawnBubbles(at: point.x, surface: height - collisionDepths[column], impactSpeed: impactSpeed)
@@ -240,7 +242,7 @@ final class WaterModel {
                 let launchColumn = min(columnCount - 1, max(0, Int(x / dx)))
                 let position = SIMD2(x, max(0, height - depths[launchColumn] - 0.012))
                 drops.append(Drop(position: position,
-                    velocity: SIMD2(side * rise * 0.8 + inletSpeed * sin(angle) * 0.15, -rise),
+                    velocity: SIMD2(side * rise * 0.8 + inletVelocity.x * 0.15, -rise),
                     area: splashArea / 2))
             }
         }
@@ -261,7 +263,7 @@ final class WaterModel {
         landedArea += area
         let sigma = max(1.5 * dx, emissionRate(at: emittedAt) / impactSpeed * 0.45)
         let footprint = GaussianFootprint(x: x, column: column, sigma: sigma, dx: dx, columnCount: columnCount)
-        let horizontal = inletSpeed * sin(angle)
+        let horizontal = inletVelocity.x
         for i in footprint.columns {
             let addedDepth = area * footprint.normalizedWeight(at: i) / dx
             depths[i] += addedDepth
@@ -292,7 +294,7 @@ final class WaterModel {
             let point = flightPosition(age: age)
             let onWall = point.x <= 0.002 || point.x >= width - 0.002
             drops.append(Drop(position: point,
-                velocity: SIMD2(onWall ? 0 : inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * age),
+                velocity: SIMD2(onWall ? 0 : inletVelocity.x, inletVelocity.y + gravity * age),
                 area: areas[group], detachedFromStream: true))
         }
         // 水流から除いた面積をそのまま水滴へ移す。投入量・着水済み量は変えない。
@@ -473,17 +475,25 @@ final class WaterModel {
     private func calculateFaceFluxes() {
         // Rusanov流束 F=(hu, hu²/h + gh²/2) を列境界で計算する。
         // 両端では仮想セルの流量の符号を反転し、壁を通る水量を0にする。
+        // 右セルの値を次の面の左セルへ引き継ぎ、除算・平方根を再計算しない。
+        var hL = depths[0]
+        var qL = -momentum[0]
+        var uL = hL > dryDepth ? qL / hL : 0
+        var speedL = abs(uL) + sqrt(gravity * hL)
         for face in 0...columnCount {
-            let left = max(0, face - 1), right = min(columnCount - 1, face)
-            let hL = depths[left], hR = depths[right]
-            let qL = face == 0 ? -momentum[left] : momentum[left]
+            let right = min(columnCount - 1, face)
+            let hR = depths[right]
             let qR = face == columnCount ? -momentum[right] : momentum[right]
-            let uL = hL > dryDepth ? qL / hL : 0
             let uR = hR > dryDepth ? qR / hR : 0
-            let speed = max(abs(uL) + sqrt(gravity * hL), abs(uR) + sqrt(gravity * hR))
+            let speedR = abs(uR) + sqrt(gravity * hR)
+            let speed = max(speedL, speedR)
             heightFlux[face] = 0.5 * (qL + qR) - 0.5 * speed * (hR - hL)
             momentumFlux[face] = 0.5 * (qL * uL + qR * uR + 0.5 * gravity * (hL*hL + hR*hR))
                 - 0.5 * speed * (qR - qL)
+            hL = hR
+            qL = qR
+            uL = uR
+            speedL = speedR
         }
     }
 
@@ -509,6 +519,14 @@ final class WaterModel {
         let desiredSum = landedArea / dx
         let currentSum = depths.reduce(0, +)
         if abs(currentSum - desiredSum) < 1e-10 && (depths.max() ?? 0) <= height { return }
+        // 全列が上下限に触れない場合は、同じ一様補正を解析的に求められる。
+        // 乾いた列・満水付近など、クリップが必要な場合だけ二分探索する。
+        let uniformShift = (desiredSum - currentSum) / Double(columnCount)
+        if (depths.min() ?? 0) + uniformShift >= 0,
+           (depths.max() ?? 0) + uniformShift <= height {
+            applyVolumeShift(uniformShift)
+            return
+        }
         var low = -max(height, depths.max() ?? 0), high = height
         for _ in 0..<44 {
             let shift = (low + high) / 2
@@ -516,6 +534,10 @@ final class WaterModel {
             if sum < desiredSum { low = shift } else { high = shift }
         }
         let shift = (low + high) / 2
+        applyVolumeShift(shift)
+    }
+
+    private func applyVolumeShift(_ shift: Double) {
         for i in depths.indices {
             let old = depths[i]
             depths[i] = min(height, max(0, old + shift))
@@ -548,7 +570,7 @@ final class WaterModel {
 
     private func streamProfile(first: Parcel) -> StreamProfile {
         // 角度が大きい場合も入口の切断面が画面内に見えないよう、上流を画面外へ延ばす。
-        let inletExtension = -(nominalRate / inletSpeed + 0.02) / (inletSpeed * cos(angle))
+        let inletExtension = -(nominalRate / inletSpeed + 0.02) / inletVelocity.y
         let youngest = isPouring ? inletExtension : max(0, time - (separatedTailStart ?? pourDuration))
         var oldest = time - first.time
         // 最古の未着水区間は水面の手前にある。近接時だけ描画上の先端を補間し、隙間を抑える。
@@ -567,12 +589,12 @@ final class WaterModel {
         // 初期に投入した量から大きさを決めるが、これは表面張力を解かない描画上の近似。
         // 最初の水が着水した後は適用せず、既存の着水点の描画へ引き継ぐ。
         let freeHead = landedArea == 0 && !nearSurface
-        let headSpeed = simd_length(SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * oldest))
+        let headSpeed = simd_length(SIMD2(inletVelocity.x, inletVelocity.y + gravity * oldest))
         let initialArea = cumulativeEmission(at: min(time * 0.5, rampDuration * 0.5))
         let headRadius = freeHead ? min(0.02, sqrt(initialArea / .pi)) : 0
         let headDuration = min(max(0, oldest - max(0, youngest)), 2 * headRadius / headSpeed)
         // 水滴に移した領域を帯でつなぎ直さず、残った帯の末尾を丸く閉じる。
-        let tailSpeed = simd_length(SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * max(0, youngest)))
+        let tailSpeed = simd_length(SIMD2(inletVelocity.x, inletVelocity.y + gravity * max(0, youngest)))
         let tailRadius = emissionRate(at: separatedTailStart ?? pourDuration) / (2 * tailSpeed)
         let tailDuration = min(max(0, oldest - youngest), tailRadius / tailSpeed)
         return StreamProfile(youngest: youngest, oldest: oldest, headRadius: headRadius,
@@ -618,7 +640,7 @@ final class WaterModel {
         let growth = min(1, max(0, age * 3))
         let wobble = (sin(phase) + 0.4 * sin(phase * 1.73)) * 0.006 * growth * material.streamWobble
         let onWall = point.x <= 0.002 || point.x >= width - 0.002
-        let velocity = SIMD2(onWall ? 0 : inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * max(0, age))
+        let velocity = SIMD2(onWall ? 0 : inletVelocity.x, inletVelocity.y + gravity * max(0, age))
         let speed = simd_length(velocity)
         let normal = SIMD2(velocity.y, -velocity.x) / speed
         // 断面の幅はQ/速度。加速すると細くなる帯に、見た目の太さの変化を重ねる。
