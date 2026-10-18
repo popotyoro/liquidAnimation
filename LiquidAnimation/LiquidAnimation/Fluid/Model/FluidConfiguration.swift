@@ -1,7 +1,10 @@
 import Foundation
 
-/// 1回の注水に使う値。シミュレーション開始時にコピーし、不透明度だけ描画時に即時反映する。
+/// 1回の注水に使う値。シミュレーション開始時にコピーし、色と不透明度は描画時に即時反映する。
 nonisolated struct FluidConfiguration: Equatable, Sendable {
+    var kind: FluidKind = .water
+    var color: FluidColorChoice = .standard
+
     /// 容器容量に対する投入総量。水面だけでなく、落下中の水と飛沫も含む。
     var fill = 0.5
     /// 0で透明、1で不透明。背後の画面の描画内容には依存しない。

@@ -106,6 +106,43 @@ struct WaterRenderingTests {
         try image.save(frame: 214)
     }
 
+    @Test("どの種類も水面・水流・気泡をMetalで描画できる", arguments: FluidKind.allCases)
+    func everyPresetRenders(kind: FluidKind) throws {
+        let scene = try OffscreenWater(kind: kind)
+        scene.advance(frames: 120)
+
+        let image = try scene.render()
+
+        #expect(image.alpha(x: image.width / 2, y: image.height - 10) > 0)
+        try image.save(frame: 120, prefix: kind.rawValue)
+    }
+
+    @Test("どの種類も不透明度0では全描画パスが透明になる", arguments: FluidKind.allCases)
+    func everyPresetSupportsZeroOpacity(kind: FluidKind) throws {
+        let scene = try OffscreenWater(kind: kind)
+        scene.advance(frames: 120)
+
+        let image = try scene.render(opacity: 0)
+
+        #expect(image.pixels.allSatisfy { $0 == 0 })
+    }
+
+    @Test("注水し直さず色だけを変えると形と不透明度を保って色が変わる")
+    func colorChangesWithoutRestarting() throws {
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+        let time = scene.fluid.model.time
+        let fraction = scene.fluid.model.fraction
+        let before = try scene.render(color: .blue)
+
+        let after = try scene.render(color: .pink)
+
+        #expect(before.pixels != after.pixels)
+        #expect(stride(from: 3, to: before.pixels.count, by: 4).allSatisfy { before.pixels[$0] == after.pixels[$0] })
+        #expect(scene.fluid.model.time == time)
+        #expect(scene.fluid.model.fraction == fraction)
+    }
+
 }
 
 /// 本番の転送・描画処理を、背景が透明なテクスチャへ実行するテスト用の場。
@@ -119,7 +156,7 @@ private final class OffscreenWater {
     private let width = 400
     private let height = 864
 
-    init(fill: Double = 0.5) throws {
+    init(fill: Double = 0.5, kind: FluidKind = .water) throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let library = try #require(device.makeDefaultLibrary())
         queue = try #require(device.makeCommandQueue())
@@ -127,6 +164,7 @@ private final class OffscreenWater {
         fluid = try FluidSimulation(device: device, aspectRatio: 2.16)
         var configuration = FluidConfiguration()
         configuration.fill = fill
+        configuration.kind = kind
         configuration.flow = 0.16
         fluid.model.reset(configuration: configuration, start: true)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
@@ -140,7 +178,7 @@ private final class OffscreenWater {
         for _ in 0..<frames { fluid.model.advance(by: 1 / 60) }
     }
 
-    func render(opacity: Double = 0.45) throws -> RenderedWater {
+    func render(opacity: Double = 0.45, color: FluidColorChoice = .standard) throws -> RenderedWater {
         fluid.uploadSurface()
         let command = try #require(queue.makeCommandBuffer())
         let pass = MTLRenderPassDescriptor()
@@ -150,7 +188,7 @@ private final class OffscreenWater {
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
         let encoder = try #require(command.makeRenderCommandEncoder(descriptor: pass))
         let uniforms = WaterUniforms(viewport: SIMD4(Float(width), Float(height), Float(opacity),
-            Float(fluid.model.columnCount)), detail: fluid.model.visualDetails)
+            Float(fluid.model.columnCount)), detail: fluid.model.visualDetails, palette: color.palette(for: fluid.model.configuration.kind))
         pipelines.encode(fluid, with: encoder, uniforms: uniforms)
         encoder.endEncoding()
         command.commit()
@@ -170,13 +208,13 @@ private struct RenderedWater {
 
     func alpha(x: Int, y: Int) -> UInt8 { pixels[(y * width + x) * 4 + 3] }
 
-    func save(frame: Int) throws {
+    func save(frame: Int, prefix: String = "water") throws {
         let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))
         let image = try #require(CGImage(width: width, height: height, bitsPerComponent: 8,
             bitsPerPixel: 32, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
             provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent))
-        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("water-frame-\(frame).png")
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(prefix)-frame-\(frame).png")
         let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         try #require(CGImageDestinationFinalize(destination))
@@ -189,9 +227,11 @@ struct FluidBufferLayoutTests {
     func sharedLayoutsMatchMetal() {
         #expect(MemoryLayout<WaterVertex>.stride == 16)
         #expect(MemoryLayout<BubbleVertex>.stride == 32)
-        #expect(MemoryLayout<WaterUniforms>.stride == 32)
+        #expect(MemoryLayout<WaterUniforms>.stride == 96)
         #expect(MemoryLayout<WaterVertex>.offset(of: \.texture) == 8)
         #expect(MemoryLayout<BubbleVertex>.offset(of: \.appearance) == 16)
         #expect(MemoryLayout<WaterUniforms>.offset(of: \.detail) == 16)
+        #expect(MemoryLayout<WaterUniforms>.offset(of: \.shallowColor) == 32)
+        #expect(MemoryLayout<WaterUniforms>.offset(of: \.edgeColor) == 80)
     }
 }

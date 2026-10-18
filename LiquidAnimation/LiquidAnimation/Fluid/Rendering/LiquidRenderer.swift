@@ -81,7 +81,8 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
 
     private func makeUniforms(size: CGSize, model: WaterModel) -> WaterUniforms {
         WaterUniforms(viewport: SIMD4(Float(size.width), Float(size.height),
-            Float(controls.configuration.sanitized.opacity), Float(model.columnCount)), detail: model.visualDetails)
+            Float(controls.configuration.sanitized.opacity), Float(model.columnCount)), detail: model.visualDetails,
+            palette: controls.configuration.color.palette(for: model.configuration.kind))
     }
 
     private func submit(_ command: any MTLCommandBuffer, model: WaterModel, simulationMilliseconds: Double) {

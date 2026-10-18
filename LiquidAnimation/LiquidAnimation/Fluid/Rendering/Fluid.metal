@@ -6,7 +6,11 @@ using namespace metal;
 struct WaterVertex { float2 position; float2 texture; };
 // viewport = ピクセル幅・高さ、不透明度、水面の列数。
 // detail = 着水中心x、着水圧力の強さ、物理時刻、縦横比。
-struct WaterUniforms { float4 viewport; float4 detail; };
+// 色は浅部・深部・水流中央・水流の縁。Swift側と同じ96バイトの配置。
+struct WaterUniforms {
+    float4 viewport; float4 detail;
+    float4 shallowColor; float4 deepColor; float4 streamColor; float4 edgeColor;
+};
 struct WaterRaster { float4 position [[position]]; float2 uv; };
 
 // 左右の持ち上がりの平均を引き、水位の偏りを抑える。高さは画面幅で正規化。
@@ -85,8 +89,8 @@ float3 impactPlumeColor(float x, float depth, constant WaterUniforms &s) {
 }
 
 // 水流と水滴で同じ色・光沢を使う。roundnessは断面の中央で1、縁で0。
-float3 roundedWaterColor(float roundness, float highlight) {
-    float3 color = mix(float3(0.025f,0.39f,0.67f), float3(0.06f,0.61f,0.84f), roundness);
+float3 roundedWaterColor(float roundness, float highlight, constant WaterUniforms &s) {
+    float3 color = mix(s.edgeColor.rgb, s.streamColor.rgb, roundness);
     return mix(color, float3(0.85f,0.96f,1.0f), highlight);
 }
 
@@ -101,7 +105,7 @@ fragment half4 waterFragment(WaterRaster in [[stage_in]],
     float coverage = smoothstep(-0.7f, 0.7f, distance);
     if (coverage <= 0) return half4(0);
     float depth = clamp(surface - in.uv.y, 0.0f, 1.0f);
-    float3 color = mix(float3(0.08f,0.65f,0.85f), float3(0.015f,0.32f,0.63f), min(1.0f, depth * 1.5f));
+    float3 color = mix(s.shallowColor.rgb, s.deepColor.rgb, min(1.0f, depth * 1.5f));
     float slope = waterSurfaceSlope(in.uv.x, s, heights);
     color = surfaceLighting(color, in.uv.x, depth, distance, slope, s);
     // 広い光の濃淡で単色の面を和らげる。細かな模様や常時動く疑似的な渦は加えない。
@@ -124,7 +128,7 @@ fragment half4 streamFragment(WaterRaster in [[stage_in]], constant WaterUniform
     float coverage = 1 - smoothstep(0.82f, 1.0f, abs(in.uv.x));
     float sheen = exp(-pow((in.uv.x + 0.4f) * 5, 2.0f));
     float body = sqrt(max(0.0f, 1 - in.uv.x * in.uv.x));
-    float3 color = roundedWaterColor(body, sheen * 0.22f);
+    float3 color = roundedWaterColor(body, sheen * 0.22f, s);
     float alpha = coverage * s.viewport.z;
     return premultipliedColor(color, alpha);
 }
@@ -135,7 +139,7 @@ fragment half4 splashFragment(WaterRaster in [[stage_in]], constant WaterUniform
     float coverage = 1 - smoothstep(0.78f, 1.0f, distance);
     float2 lightOffset = in.uv - float2(-0.3f, 0.3f);
     float highlight = exp(-dot(lightOffset, lightOffset) * 14);
-    float3 color = roundedWaterColor(sqrt(max(0.0f, 1 - distance * distance)), highlight * 0.48f);
+    float3 color = roundedWaterColor(sqrt(max(0.0f, 1 - distance * distance)), highlight * 0.48f, s);
     float alpha = coverage * s.viewport.z;
     return premultipliedColor(color, alpha);
 }
@@ -163,7 +167,7 @@ fragment half4 bubbleFragment(BubbleRaster in [[stage_in]],
     float ring = exp(-pow((radius - 0.78f) / edgeWidth, 2.0f));
     float glint = exp(-dot(in.uv - float2(-0.3f, 0.4f), in.uv - float2(-0.3f, 0.4f)) * 28);
     float coverage = 1 - smoothstep(0.92f, 1.0f, radius);
-    float3 color = mix(float3(0.05f,0.38f,0.57f), float3(0.85f,0.98f,1.0f),
+    float3 color = mix(s.deepColor.rgb, float3(0.85f,0.98f,1.0f),
                        clamp(0.5f + in.uv.y * 0.5f + glint, 0.0f, 1.0f));
     float alpha = coverage * (ring * 0.65f + glint * 0.55f) * in.opacity * s.viewport.z;
     return premultipliedColor(color, alpha);

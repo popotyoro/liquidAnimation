@@ -440,15 +440,18 @@ struct FluidPlaybackTests {
         #expect(water.time > 0.9)
         controls.configuration.fill = 0.25
         controls.configuration.angle = -30
+        controls.configuration.kind = .beer
 
         // 設定編集だけでは進行中の注水条件を変えず、再注水で確定する。
         playback.advance(water, controls: controls, now: 2)
         #expect(water.configuration.fill == 0.5)
+        #expect(water.configuration.kind == .water)
         controls.pour()
         playback.advance(water, controls: controls, now: 3)
 
         #expect(water.configuration.fill == 0.25)
         #expect(water.configuration.angle == -30)
+        #expect(water.configuration.kind == .beer)
         #expect(abs(water.time - 1 / 60) < 1e-8)
         playback.advance(water, controls: controls, now: 4)
         #expect(water.time > 1 / 60)

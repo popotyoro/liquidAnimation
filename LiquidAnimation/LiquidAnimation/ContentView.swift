@@ -105,57 +105,6 @@ private struct DemoBackground: View {
     }
 }
 
-private struct FluidSettingsView: View {
-    @Bindable var controls: FluidControls
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("液体") {
-                    setting("目標量", value: $controls.configuration.fill, range: 0...1, unit: "%", scale: 100)
-                    setting("不透明度", value: $controls.configuration.opacity, range: 0...1, unit: "%", scale: 100)
-                }
-                Section {
-                    setting("注ぐ位置", value: $controls.configuration.sourcePosition,
-                            range: 0.15...0.85, unit: "%", scale: 100)
-                    setting("注ぐ角度", value: $controls.configuration.angle,
-                            range: -65...65, unit: "°")
-                    setting("流量", value: $controls.configuration.flow,
-                            range: 0.02...0.16, unit: "% / 秒", scale: 100)
-                } header: {
-                    Text("注ぎ方")
-                } footer: {
-                    Text("不透明度はすぐに反映します。それ以外は次に「注ぐ」を押すと反映し、空の状態から開始します。角度は下向きが 0°、正の値で右向きです。")
-                }
-                Section("計測") {
-                    LabeledContent("描画頻度", value: String(format: "%.0f fps", controls.framesPerSecond))
-                    LabeledContent("GPU 時間", value: String(format: "%.1f ms", controls.gpuMilliseconds))
-                    LabeledContent("物理計算（CPU）", value: String(format: "%.1f ms", controls.simulationMilliseconds))
-                    Text("60fps は目標値です。性能の判断には実機での測定が必要です。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("液体の設定")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完了") { dismiss() } } }
-        }
-    }
-
-    private func setting(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
-                         unit: String, scale: Double = 1) -> some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text("\(value.wrappedValue * scale, specifier: "%.0f") \(unit)")
-                    .foregroundStyle(.secondary).monospacedDigit()
-            }
-            Slider(value: value, in: range) { Text(title) }
-                .accessibilityValue("\(value.wrappedValue * scale, specifier: "%.0f") \(unit)")
-        }
-    }
-}
 
 #Preview {
     ContentView()

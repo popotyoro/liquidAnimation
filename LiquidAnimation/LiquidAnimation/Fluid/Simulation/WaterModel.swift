@@ -39,6 +39,9 @@ final class WaterModel {
     private var bubbles: [Bubble] = []
     private var lastBubbleTime = -1.0
     private var bubbleSequence = 0
+    private var lastCarbonationTime = -1.0
+    private var carbonationSequence = 0
+    private var material = FluidMaterial()
     var bubbleCount: Int { bubbles.count }
     var visualDetails: SIMD4<Float> {
         let sum = impactPressure.reduce(0, +)
@@ -50,7 +53,7 @@ final class WaterModel {
     }
     private var targetArea = 0.0
     private let gravity = 9.81
-    private let inletSpeed = 1.6
+    private var inletSpeed: Double { material.inletSpeed }
     private let dryDepth = 1e-7
 
     private var nominalRate: Double { configuration.flow * capacity }
@@ -95,6 +98,7 @@ final class WaterModel {
     /// 設定を確定し、空中の水・水面・圧力・時刻をまとめて初期化する。
     func reset(configuration: FluidConfiguration, start: Bool) {
         self.configuration = configuration.sanitized
+        material = self.configuration.kind.material
         targetArea = start ? self.configuration.fill * capacity : 0
         emittedArea = 0
         landedArea = 0
@@ -109,6 +113,8 @@ final class WaterModel {
         bubbles.removeAll(keepingCapacity: true)
         lastBubbleTime = -1
         bubbleSequence = 0
+        lastCarbonationTime = -1
+        carbonationSequence = 0
         for i in depths.indices {
             depths[i] = 0
             momentum[i] = 0
@@ -128,6 +134,7 @@ final class WaterModel {
             // 飛沫を戻す → 水流を着水させる → 圧力を更新 → 水面を進める、の順で処理する。
             advanceDrops(dt: dt)
             advanceBubbles(dt: dt)
+            spawnCarbonationBubble()
             for i in impactImpulse.indices { impactImpulse[i] = 0 }
             depositArrivals()
             detachThinTail()
@@ -180,7 +187,7 @@ final class WaterModel {
                 continue
             }
             let impactSpeed = inletSpeed * cos(angle) + gravity * age
-            if collisionDepths[column] > 0.035, time - lastBubbleTime >= 0.045,
+            if collisionDepths[column] > 0.035, time - lastBubbleTime >= material.entrainmentInterval,
                emissionRate(at: parcel.time) > nominalRate * 0.05 {
                 spawnBubbles(at: point.x, surface: height - collisionDepths[column], impactSpeed: impactSpeed)
             }
@@ -198,12 +205,12 @@ final class WaterModel {
         var splashArea = 0.0
         if depths[column] > 0.008, height - depths[column] > 0.025,
            time - lastSplashTime > 0.025, drops.count + 2 <= Self.maximumDrops {
-            splashArea = parcel.area * 0.32
+            splashArea = parcel.area * 0.32 * material.splashScale
             lastSplashTime = time
             splashSequence += 1
             for side in [-1.0, 1.0] {
                 let variation = 0.8 + 0.2 * sin(Double(splashSequence) * 2.4 + side)
-                let rise = min(1.15, impactSpeed * 0.28) * variation
+                let rise = min(1.15, impactSpeed * 0.28) * variation * material.splashScale
                 let offset = configuration.flow * capacity / impactSpeed * 0.6 + dx
                 let x = min(width - 0.002, max(0.002, point.x + side * offset))
                 let launchColumn = min(columnCount - 1, max(0, Int(x / dx)))
@@ -243,7 +250,7 @@ final class WaterModel {
     /// 小さな比較試作として、停止後の細い末尾だけを最大3滴へ分ける。
     /// 表面張力による分裂は解かず、減流区間の最後の40%を対象とする。
     private func detachThinTail() {
-        guard !attemptedTailSeparation, targetArea > 0, !isPouring,
+        guard material.separatesTail, !attemptedTailSeparation, targetArea > 0, !isPouring,
               time >= pourDuration + 0.05 else { return }
         attemptedTailSeparation = true
         let cutTime = pourDuration - rampDuration * 0.4
@@ -307,13 +314,32 @@ final class WaterModel {
         for side in [-1.0, 1.0] {
             let phase = Double(bubbleSequence) * 2.399 + side
             let variation = 0.5 + 0.5 * sin(phase)
-            let radius = 0.002 + 0.004 * variation
+            let radius = (0.002 + 0.004 * variation) * material.bubbleRadiusScale
             bubbles.append(Bubble(
                 position: SIMD2(min(width - radius, max(radius, x + side * (0.005 + variation * 0.012))),
                                 min(height - radius, surface + 0.012 + radius * 2)),
                 velocity: SIMD2(side * (0.03 + variation * 0.08), min(0.45, impactSpeed * 0.10)),
                 radius: radius, age: 0, lifetime: 1.8 + variation, phase: phase))
         }
+    }
+
+    /// 溶存ガスの装飾的な気泡。水量や圧力は変えず、注水後も液体内に発生させる。
+    private func spawnCarbonationBubble() {
+        guard let interval = material.carbonationInterval, landedArea > 0,
+              time - lastCarbonationTime >= interval else { return }
+        lastCarbonationTime = time
+        guard bubbles.count < Self.maximumBubbles else { return }
+        carbonationSequence += 1
+        // 確定的な分布で発生点を散らす。乱数状態や毎フレームの追加配列は持たない。
+        let phase = Double(carbonationSequence) * 2.399
+        let variation = 0.5 + 0.5 * sin(phase)
+        let x = width * (0.06 + 0.88 * (Double(carbonationSequence) * 0.618034).truncatingRemainder(dividingBy: 1))
+        let column = min(columnCount - 1, max(0, Int(x / dx)))
+        guard depths[column] > 0.035 else { return }
+        let radius = (0.002 + 0.003 * variation) * material.bubbleRadiusScale
+        let y = height - depths[column] * (0.18 + 0.7 * variation)
+        bubbles.append(Bubble(position: SIMD2(x, y), velocity: SIMD2(0, -0.10 - radius * 14),
+            radius: radius, age: 0, lifetime: 1.8 + variation, phase: phase))
     }
 
     /// 最初は下へ巻き込まれ、抵抗と浮力の近似で上昇する。合体・分裂・水への反作用は解かない。
@@ -388,7 +414,7 @@ final class WaterModel {
         // 結合係数0.12と水頭6cmの上限は、未解像の鉛直運動を安定させる近似。
         let response = 1 - exp(-dt / 0.06)
         for i in depths.indices {
-            let target = min(gravity * 0.06, 0.12 * impactImpulse[i] / dt)
+            let target = min(gravity * 0.06, 0.12 * impactImpulse[i] / dt) * material.impactScale
             impactPressure[i] += (target - impactPressure[i]) * response
         }
     }
@@ -419,7 +445,7 @@ final class WaterModel {
     private func integrateDepthAndMomentum(dt: Double) {
         let ratio = dt / dx
         // 指数減衰は時間刻みを変えても同じ時間あたりの減衰率になる。
-        let drag = exp(-2.8 * dt)
+        let drag = exp(-material.momentumDamping * dt)
         for i in depths.indices {
             depths[i] = max(0, depths[i] - ratio * (heightFlux[i + 1] - heightFlux[i]))
             let left = max(0, i - 1), right = min(columnCount - 1, i + 1)
@@ -545,13 +571,13 @@ final class WaterModel {
         let phase = (time - age) * 29
         // 落下中に育つうねりは描画上の近似。乱流や表面張力を解いてはいない。
         let growth = min(1, max(0, age * 3))
-        let wobble = (sin(phase) + 0.4 * sin(phase * 1.73)) * 0.006 * growth
+        let wobble = (sin(phase) + 0.4 * sin(phase * 1.73)) * 0.006 * growth * material.streamWobble
         let onWall = point.x <= 0.002 || point.x >= width - 0.002
         let velocity = SIMD2(onWall ? 0 : inletSpeed * sin(angle), inletSpeed * cos(angle) + gravity * max(0, age))
         let speed = simd_length(velocity)
         let normal = SIMD2(velocity.y, -velocity.x) / speed
         // 断面の幅はQ/速度。加速すると細くなる帯に、見た目の太さの変化を重ねる。
-        let halfWidth = areaRate / (2 * speed) * (1 + 0.22 * growth * sin(phase * 1.3))
+        let halfWidth = areaRate / (2 * speed) * (1 + 0.22 * growth * sin(phase * 1.3) * material.streamWobble)
         if !onWall { point += normal * wobble }
         return (point, normal, roundedStreamWidth(halfWidth, at: age, profile: profile))
     }
