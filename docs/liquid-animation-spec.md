@@ -57,7 +57,7 @@ var body: some View {
 
 `ignoresSafeArea` の既定値は `false`。通常は適用先の領域に重ね、`true`なら液体レイヤーだけをセーフエリアまで広げる。背景のレイアウトサイズは変更しない。デモでは画面上端から注ぐため `true` を指定する。
 
-`View`拡張は内部の`LiquidOverlayModifier: ViewModifier`を呼び出す入口とする。重ね合わせ、セーフエリア、タッチの透過、アクセシビリティからの除外はこのmodifier内で設定する。`LiquidOverlay`はファイル内の実装とし、利用側での`ZStack`や`.overlay`の指定は不要。現在はアプリ内のAPIであり、別パッケージ向けの`public`宣言は行っていない。
+`View`拡張は内部の`LiquidOverlayModifier: ViewModifier`を呼び出す入口とする。重ね合わせ、セーフエリア、タッチの透過、アクセシビリティからの除外はこのmodifier内で設定する。`LiquidOverlay`はモジュール内部の実装とし、利用側での`ZStack`や`.overlay`の指定は不要。現在はアプリ内のAPIであり、別パッケージ向けの`public`宣言は行っていない。
 
 ## 落下水流と浅水モデルを組み合わせる
 
@@ -144,13 +144,19 @@ Metalでは透明な中心、明暗のある縁、小さな反射光を描く。
 | 担当箇所 | 責務 |
 | --- | --- |
 | `ContentView.swift` / SwiftUI | 背景画面、設定、注水・停止・リセットの操作 |
-| `FluidConfiguration.swift` | 設定値の範囲補正、操作要求、表示用の状態・計測値 |
-| `FluidSimulation.swift` / `PourEmission`・`GaussianFootprint` | 注水曲線と積分、着水圧力・着水量のガウス分布と正規化 |
-| `FluidSimulation.swift` / `WaterModel` | 投入量、落下軌道、水深・運動量・着水圧力、飛沫と気泡の移動 |
-| `FluidSimulation.swift` / 描画データ生成 | 水流の太さ・うねり・先端形状、飛沫と気泡の頂点、共有バッファへの転送 |
-| `LiquidOverlay.swift` / `FluidPlayback` | 操作要求の消費、一時停止・再開、フレーム時間の制限 |
-| `LiquidOverlay.swift` / `LiquidRenderer` | SwiftUIと`MTKView`の接続、リサイズ、GPU完了通知、計測報告 |
-| `LiquidOverlay.swift` / `WaterRenderPipelines` | Metalの合成設定と描画順。アプリとオフスクリーン検証で共用 |
+| `FluidConfiguration.swift` | 注水設定と範囲補正 |
+| `FluidControls.swift` | 操作要求と表示用の状態・計測値 |
+| `PourEmission.swift`・`GaussianFootprint.swift` | 注水曲線と積分、格子上のガウス分布と正規化 |
+| `WaterModel.swift` | 投入量、落下軌道、水深・運動量・着水圧力、描画用メッシュの生成 |
+| `WaterModel+Drop.swift`・`WaterModel+Bubble.swift`・`WaterModel+Parcel.swift`・`WaterModel+StreamProfile.swift` | 水滴・気泡・水流区間・描画輪郭のデータ型。`WaterModel`内の名前空間を保つ |
+| `FluidSimulation.swift` | 物理モデルと共有バッファの所有、GPUへの転送 |
+| `WaterVertex.swift`・`BubbleVertex.swift`・`WaterUniforms.swift` | SwiftとMetalで共有するデータの配置 |
+| `View+LiquidOverlay.swift`・`LiquidOverlayModifier.swift` | SwiftUIからの入口とレイヤーの配置 |
+| `LiquidOverlay.swift` | `UIViewRepresentable`による`MTKView`の生成とライフサイクル |
+| `FluidPlayback.swift` | 操作要求の消費、一時停止・再開、フレーム時間の制限 |
+| `LiquidRenderer.swift` | リサイズ、GPUフレーム管理、完了通知、計測報告 |
+| `WaterRenderPipelines.swift` | Metalの合成設定と描画順。アプリとオフスクリーン検証で共用 |
+| `FluidError.swift` | Metal初期化・描画のエラー情報 |
 | `Fluid.metal` | 色、不透明度、輪郭、ハイライト、気泡の縁、水中模様の描画 |
 
 色や光沢の変更は主に`Fluid.metal`、水流の形状はSwift側の描画データ生成、粘りや波など動きの変更は物理モデルで扱う。現在の色と光沢は水向けの固定値で、液体の種類や色を選ぶ設定はない。

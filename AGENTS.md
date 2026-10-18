@@ -23,7 +23,7 @@ SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iO
 
 ## コードの書き方
 
-インデントはスペース4つ。型は `UpperCamelCase`、変数・関数は `lowerCamelCase`、ファイル名は主な型に合わせる。現時点で専用のフォーマッターやリンターは導入していない。
+インデントはスペース4つ。型は `UpperCamelCase`、変数・関数は `lowerCamelCase`、Swiftは原則1ファイル1型とし、ファイル名は型名に合わせる。View拡張は `View+LiquidOverlay.swift`、特定の型に属する補助型は `WaterModel+Drop.swift` のように所属を表す。現時点で専用のフォーマッターやリンターは導入していない。
 
 アプリとテストは Swift 6、`SWIFT_STRICT_CONCURRENCY = complete` を使用する。アプリは既定の MainActor 隔離を利用し、型への重複した `@MainActor` は省く。UI・水面モデル・描画バッファの変更をこの隔離内に保つ。Metal の完了通知は `@Sendable` とし、値を取り出してから `Task { @MainActor in ... }` で戻す。前のGPUコマンドが完了するまで共有バッファを書き換えない。共有する値型は `Sendable` にする。警告回避のためにチェックを弱めたり、`@unchecked Sendable` を追加したりしない。
 
