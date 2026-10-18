@@ -60,11 +60,9 @@ fragment half4 waterFragment(WaterRaster in [[stage_in]],
     float lightPatch = exp(-pow((in.uv.x - 0.28f + depth * 0.7f) / 0.28f, 2.0f));
     float reflection = facing * (0.08f + lightPatch * 0.22f) * exp(-depth * 32);
     color = mix(color, float3(0.86f,0.96f,1.0f), reflection);
-    // 縁の直下に暗部、その上に途切れる反射を置き、丸い水面の厚みを表す。
+    // 水面の縁に途切れる反射を置き、丸みを表す。輪郭に沿う暗い線は付けない。
     // 太さは画面幅基準。白い一本線にならないよう波の傾きで反射を弱める。
     float lipDepth = max(0.0f, distance) / max(1.0f, s.viewport.x * 0.018f);
-    float underside = exp(-pow((lipDepth - 0.85f) * 2.6f, 2.0f));
-    color *= 1 - underside * 0.18f;
     float crest = exp(-pow((lipDepth - 0.22f) * 4.5f, 2.0f));
     color = mix(color, float3(0.79f,0.94f,0.98f),
                 crest * (0.10f + 0.32f * facing * lightPatch));
