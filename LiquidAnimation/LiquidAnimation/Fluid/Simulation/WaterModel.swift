@@ -20,6 +20,12 @@ final class WaterModel {
     private(set) var emittedArea = 0.0
     private(set) var landedArea = 0.0
     private(set) var time = 0.0
+    /// 着水済みの量のうち、泡の膜に保持される液体（m²）。landedAreaの内数。
+    private(set) var foamLiquidArea = 0.0
+    /// 液中に巻き込まれた微細気泡の白濁度。0〜1の描画用近似。
+    private(set) var beerCloudiness = 0.0
+    /// 保持量から白濁域の厚さへ変換する表示用近似。液面の内側だけを覆う。
+    var foamHeight: Double { foamLiquidArea / width / 0.40 }
     private var parcels: [Parcel] = []
     static let maximumDrops = 96
 
@@ -103,6 +109,8 @@ final class WaterModel {
         emittedArea = 0
         landedArea = 0
         time = 0
+        foamLiquidArea = 0
+        beerCloudiness = 0
         parcels.removeAll(keepingCapacity: true)
         drops.removeAll(keepingCapacity: true)
         attemptedTailSeparation = false
@@ -131,18 +139,34 @@ final class WaterModel {
             let dt = stableTimeStep(remaining: remaining)
             time += dt
             emitWater(dt: dt)
+            let previousLandedArea = landedArea
             // 飛沫を戻す → 水流を着水させる → 圧力を更新 → 水面を進める、の順で処理する。
             advanceDrops(dt: dt)
             advanceBubbles(dt: dt)
             spawnCarbonationBubble()
             for i in impactImpulse.indices { impactImpulse[i] = 0 }
             depositArrivals()
+            updateFoam(dt: dt, arrivingArea: max(0, landedArea - previousLandedArea))
             detachThinTail()
             updateImpactPressure(dt: dt)
             solveShallowWater(dt: dt)
             remaining -= dt
         }
         preserveVolume()
+    }
+
+    /// 注ぎ始めは90%を泡に保持し、たまるにつれて12%へ下げる。
+    /// 6秒の時定数で排液し、下の液体へ戻す。係数は見た目のための近似。
+    private func updateFoam(dt: Double, arrivingArea: Double) {
+        guard configuration.kind == .beer else { return }
+        let foamingFraction = 0.12 + 0.78 * exp(-landedFraction / 0.08)
+        foamLiquidArea = min(landedArea,
+            foamLiquidArea * exp(-dt / 6) + arrivingArea * foamingFraction)
+        // 着水で白濁し、注水を止めると微細気泡の浮上を近似して透明に戻す。
+        // 更新間隔に依存しない指数応答。液体の体積・運動量は変えない。
+        let clearing = beerCloudiness * exp(-dt / 2.4)
+        let entrainment = 1 - exp(-arrivingArea / (capacity * 0.025))
+        beerCloudiness = clearing + (1 - clearing) * entrainment
     }
 
     /// 波速と流速に対して、1ステップでセルを飛び越えない刻みを選ぶ。

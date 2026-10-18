@@ -3,6 +3,49 @@ import Testing
 
 @MainActor
 struct FluidPresetTests {
+    @Test("ビールは注水後に水量を保ったまま泡が減り液中の白濁が抜ける")
+    func beerClearsAndDrainsWithoutLosingVolume() {
+        let water = makeWater(kind: .beer)
+        for _ in 0..<360 { water.advance(by: 1 / 60) }
+        let foam = water.foamLiquidArea
+        let cloudiness = water.beerCloudiness
+        let landed = water.landedArea
+        #expect(foam > 0)
+        #expect(cloudiness > 0)
+        #expect(water.airborneFraction < 1e-9)
+
+        for _ in 0..<600 { water.advance(by: 1 / 60) }
+
+        #expect(water.foamLiquidArea > 0)
+        #expect(water.foamLiquidArea < foam * 0.3)
+        #expect(water.beerCloudiness < cloudiness * 0.05)
+        #expect(abs(water.landedArea - landed) < 1e-9)
+        #expect(abs(water.fraction - 0.5) < 1e-9)
+    }
+
+    @Test("ビールをリセットすると泡と液中の白濁も消える")
+    func resetClearsBeerFoamAndCloudiness() {
+        let water = makeWater(kind: .beer)
+        for _ in 0..<120 { water.advance(by: 1 / 60) }
+        #expect(water.foamLiquidArea > 0)
+        #expect(water.beerCloudiness > 0)
+
+        water.reset(configuration: water.configuration, start: false)
+
+        #expect(water.foamLiquidArea == 0)
+        #expect(water.beerCloudiness == 0)
+        #expect(water.foamHeight == 0)
+    }
+
+    @Test("ビール以外には表面の泡や液中の白濁を加えない",
+          arguments: [FluidKind.water, .sparklingWater, .viscousWater])
+    func otherPresetsDoNotDevelopBeerFoam(kind: FluidKind) {
+        let water = makeWater(kind: kind)
+        for _ in 0..<240 { water.advance(by: 1 / 60) }
+        #expect(water.foamLiquidArea == 0)
+        #expect(water.beerCloudiness == 0)
+    }
+
     @Test("どの種類でも指定量を保存し水深を容器内に保つ",
           arguments: FluidKind.allCases, [0.0, 0.5, 1.0])
     func presetsPreserveRequestedVolume(kind: FluidKind, fill: Double) {

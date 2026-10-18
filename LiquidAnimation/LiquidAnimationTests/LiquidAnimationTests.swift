@@ -382,9 +382,10 @@ struct WaterModelInputTests {
 
 @MainActor
 struct FluidPlaybackTests {
-    @Test("一時停止は水の状態を固定し再開時に停止時間の追いつき計算をしない")
-    func pauseFreezesStateAndResumeSkipsElapsedTime() {
+    @Test("一時停止は水と泡の状態を固定し再開時に停止時間の追いつき計算をしない", arguments: [FluidKind.water, .beer])
+    func pauseFreezesStateAndResumeSkipsElapsedTime(kind: FluidKind) {
         let controls = FluidControls()
+        controls.configuration.kind = kind
         let water = WaterModel(aspectRatio: 2.16)
         var playback = FluidPlayback()
         controls.pour()
@@ -394,6 +395,8 @@ struct FluidPlaybackTests {
         let fraction = water.fraction
         let pressure = water.impactPressure
         let bubbles = water.bubbleVertices().map(\.position)
+        let foam = water.foamLiquidArea
+        let cloudiness = water.beerCloudiness
 
         controls.isPaused = true
         playback.advance(water, controls: controls, now: 10)
@@ -403,6 +406,8 @@ struct FluidPlaybackTests {
         #expect(water.fraction == fraction)
         #expect(water.impactPressure == pressure)
         #expect(water.bubbleVertices().map(\.position) == bubbles)
+        #expect(water.foamLiquidArea == foam)
+        #expect(water.beerCloudiness == cloudiness)
 
         controls.isPaused = false
         playback.advance(water, controls: controls, now: 20)

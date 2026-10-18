@@ -6,10 +6,11 @@ using namespace metal;
 struct WaterVertex { float2 position; float2 texture; };
 // viewport = ピクセル幅・高さ、不透明度、水面の列数。
 // detail = 着水中心x、着水圧力の強さ、物理時刻、縦横比。
-// 色は浅部・深部・水流中央・水流の縁。Swift側と同じ96バイトの配置。
+// foam.xyzは泡の厚さ・白濁度・平均液深。Swift側と同じ112バイトの配置。
 struct WaterUniforms {
     float4 viewport; float4 detail;
     float4 shallowColor; float4 deepColor; float4 streamColor; float4 edgeColor;
+    float4 foam;
 };
 struct WaterRaster { float4 position [[position]]; float2 uv; };
 
@@ -30,6 +31,31 @@ half4 premultipliedColor(float3 color, float alpha) {
     return half4(half3(color * alpha), half(alpha));
 }
 
+// 不規則な間隔・幅の丸い盛り上がり。大小2段で泡の集合を表す。
+float foamMounds(float coordinate) {
+    float cell = floor(coordinate);
+    float height = 0;
+    for (int i = -1; i <= 1; ++i) {
+        float index = cell + i;
+        float random = fract(sin(index * 127.1f + 19.7f) * 43758.5453f);
+        float center = index + 0.25f + random * 0.5f;
+        float radius = 0.30f + random * 0.18f;
+        float offset = (coordinate - center) / radius;
+        height = max(height, (0.65f + 0.35f * random) * exp(-offset * offset * 2));
+    }
+    return height;
+}
+
+// 上限の液面より内側へ凹凸を作る。泡が薄くなると凹凸も消える。
+float foamSurfaceInset(float x, float time, float thickness, float depth) {
+    if (thickness <= 0) return 0;
+    float drift = 0.002f * sin(time * 0.4f);
+    float mounds = 0.90f * foamMounds((x + drift) * 5)
+        + 0.10f * foamMounds((x - drift) * 31 + 3.1f);
+    float amplitude = min(0.026f, min(thickness * 0.35f, depth * 0.35f));
+    return amplitude * (1 - mounds);
+}
+
 // 表示用の水面。壁際のメニスカスと、着水中だけの細かい波を重ねる。
 // 液量の計算には使わない。空・満水では変形を消し、画面外へ水を増やさない。
 float visibleSurface(float x, constant WaterUniforms &s, device const float *heights) {
@@ -41,7 +67,8 @@ float visibleSurface(float x, constant WaterUniforms &s, device const float *hei
     float room = smoothstep(0.0f, 0.04f, min(surface, 1 - surface) * aspect);
     float meniscus = meniscusHeight(x);
     float ripples = impactRippleHeight(x, s.detail.z, s.detail.y);
-    return clamp(surface + room * (meniscus + ripples) / aspect, 0.0f, 1.0f);
+    float visible = clamp(surface + room * (meniscus + ripples) / aspect, 0.0f, 1.0f);
+    return max(0.0f, visible - foamSurfaceInset(x, s.detail.z, s.foam.x, visible * aspect) / aspect);
 }
 
 // 画面全体を覆う大きな三角形。水の有無はフラグメント側で判定する。
@@ -112,6 +139,66 @@ fragment half4 waterFragment(WaterRaster in [[stage_in]],
     color *= 0.94f + 0.09f * exp(-pow((in.uv.x - 0.3f + depth * 0.4f) / 0.5f, 2.0f));
     color += impactPlumeColor(in.uv.x, depth, s);
     float alpha = coverage * s.viewport.z;
+    return premultipliedColor(color, alpha);
+}
+
+// セルごとの中心を散らし、整列しない細かな泡の模様を作る。
+float2 foamCellOffset(float2 cell) {
+    return fract(sin(float2(dot(cell, float2(127.1f, 311.7f)),
+                             dot(cell, float2(269.5f, 183.3f)))) * 43758.5453f);
+}
+
+float foamCellDistance(float2 point) {
+    float2 cell = floor(point);
+    float nearest = 2.0f;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            float2 neighbor = cell + float2(x, y);
+            float2 center = neighbor + 0.2f + 0.6f * foamCellOffset(neighbor);
+            nearest = min(nearest, length(point - center));
+        }
+    }
+    return nearest;
+}
+
+// 液面の内側を泡で白濁させ、排液につれて下から液体を見せる。
+// 液面より上への膨張は描かない。
+fragment half4 foamFragment(WaterRaster in [[stage_in]],
+                            constant WaterUniforms &s [[buffer(0)]],
+                            device const float *heights [[buffer(1)]]) {
+    float thickness = s.foam.x;
+    if (thickness <= 0 || s.viewport.z <= 0) return half4(0);
+    float surface = visibleSurface(in.uv.x, s, heights);
+    if (surface <= 1e-7f) return half4(0);
+    float aspect = max(s.detail.w, 0.5f);
+    float aboveSurface = (in.uv.y - surface) * aspect;
+    // 上端とは別に、平均液深と排液量から液体との境界を求める。
+    // 局所水面から一定の厚さを引くと、上下の凹凸が複写されてしまう。
+    float phase = in.uv.x + 0.003f * sin(s.detail.z * 0.4f);
+    float unevenness = 0.008f * sin(in.uv.x * 13 + s.detail.z * 0.12f);
+    float top = 0;
+    float interfaceHeight = max(0.0f, s.foam.z * aspect - thickness * (1 + unevenness));
+    float bottom = interfaceHeight - surface * aspect;
+    float pixel = 1 / s.viewport.x;
+    float transition = max(pixel * 2, thickness * 0.16f);
+    float insideWater = 1 - smoothstep(top - pixel, top + pixel, aboveSurface);
+    float head = smoothstep(bottom - transition, bottom + transition, aboveSurface);
+    // 白濁が底から抜ける。境界を広くぼかし、硬い白帯とは別の層にする。
+    float cloudiness = clamp(s.foam.y * 1.15f, 0.0f, 1.0f);
+    float clearHeight = s.foam.z * (1 - cloudiness);
+    float mist = cloudiness * smoothstep(clearHeight - s.foam.z * 0.12f,
+                                         clearHeight + s.foam.z * 0.16f, in.uv.y);
+    float coverage = insideWater * max(head, mist * 0.88f);
+    if (coverage <= 0) return half4(0);
+    // 模様も容器基準にし、上端の起伏を内部へ繰り返さない。
+    float cells = foamCellDistance(float2(phase, in.uv.y * aspect) * 125);
+    float rims = smoothstep(0.27f, 0.54f, cells);
+    // 液中の濁りは黄みを残し、上の泡ほど白くする。細胞模様は控えめにする。
+    float3 cream = mix(float3(0.99f, 0.98f, 0.93f), float3(0.86f, 0.82f, 0.69f), rims * 0.10f);
+    float3 color = mix(float3(0.99f, 0.90f, 0.65f), cream, head);
+    float elevation = clamp((aboveSurface - bottom) / max(top - bottom, pixel), 0.0f, 1.0f);
+    color *= mix(0.94f, 1.0f, elevation);
+    float alpha = coverage * (1 - pow(1 - s.viewport.z, 2.8f));
     return premultipliedColor(color, alpha);
 }
 

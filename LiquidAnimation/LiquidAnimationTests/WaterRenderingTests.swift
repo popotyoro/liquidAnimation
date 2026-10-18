@@ -8,6 +8,20 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct WaterRenderingTests {
+    @Test("ビールの泡から液体へ戻る過程を時系列で描画できる")
+    func beerFoamRendersOverTime() throws {
+        let scene = try OffscreenWater(kind: .beer)
+        var previousFrame = 0
+        for frame in [60, 120, 240, 600, 1200] {
+            scene.advance(frames: frame - previousFrame)
+            let image = try scene.render()
+            try image.save(frame: frame, prefix: "beer-foam")
+            print("Beer foam at \(frame): retained=\(scene.fluid.model.foamLiquidArea), height=\(scene.fluid.model.foamHeight)")
+            #expect(image.pixels.enumerated().contains { $0.offset % 4 == 3 && $0.element > 0 })
+            previousFrame = frame
+        }
+    }
+
     @Test("50%まで溜まった水は画面上部を透明に保ち指定した不透明度で描く", arguments: [0.0, 0.45, 1.0])
     func settledPoolUsesConfiguredOpacity(opacity: Double) throws {
         let scene = try OffscreenWater()
@@ -256,11 +270,12 @@ struct FluidBufferLayoutTests {
     func sharedLayoutsMatchMetal() {
         #expect(MemoryLayout<WaterVertex>.stride == 16)
         #expect(MemoryLayout<BubbleVertex>.stride == 32)
-        #expect(MemoryLayout<WaterUniforms>.stride == 96)
+        #expect(MemoryLayout<WaterUniforms>.stride == 112)
         #expect(MemoryLayout<WaterVertex>.offset(of: \.texture) == 8)
         #expect(MemoryLayout<BubbleVertex>.offset(of: \.appearance) == 16)
         #expect(MemoryLayout<WaterUniforms>.offset(of: \.detail) == 16)
         #expect(MemoryLayout<WaterUniforms>.offset(of: \.shallowColor) == 32)
         #expect(MemoryLayout<WaterUniforms>.offset(of: \.edgeColor) == 80)
+        #expect(MemoryLayout<WaterUniforms>.offset(of: \.foam) == 96)
     }
 }
