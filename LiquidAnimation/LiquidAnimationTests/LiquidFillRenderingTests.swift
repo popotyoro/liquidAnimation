@@ -7,44 +7,47 @@ import UIKit
 @MainActor
 @Suite(.serialized)
 struct LiquidFillRenderingTests {
-    @Test("各行は0秒・途中・完了でそれぞれの目標割合まで下から塗られる")
-    func rowsRenderAtDifferentLevels() throws {
+    @Test("日付セルは空・途中・完了でそれぞれの量まで下から塗られる")
+    func calendarCellsRenderAtDifferentLevels() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 1)))
+        let month = LiquidCalendarMonth(containing: date, calendar: calendar)
         for (index, progress) in [0.0, 0.5, 1.0].enumerated() {
-            let content = VStack(spacing: 12) {
-                ForEach(Array(LiquidFillSample.examples.prefix(5))) { sample in
-                    LiquidFillRow(sample: sample, fraction: sample.target * progress,
-                                  color: .liquidFill(for: FluidConfiguration()))
+            let content = LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7),
+                                    spacing: 8) {
+                ForEach(month.days) { day in
+                    LiquidCalendarCell(day: day, progress: progress,
+                                       color: .liquidFill(for: FluidConfiguration()))
                 }
             }
-            .padding(20)
-            .frame(width: 400)
+            .padding(16).frame(width: 400)
             .background(Color(uiColor: .systemGroupedBackground))
             .environment(\.colorScheme, .light)
             let renderer = ImageRenderer(content: content)
             renderer.scale = 2
             let image = try #require(renderer.uiImage)
-            try save(image, name: "liquid-fill-rows-\(index)")
+            try save(image, name: "liquid-calendar-phase-\(index)")
         }
     }
 
-    @Test("実際のList画面でも空と投入後の行が表示される")
-    func listScreenRemainsVisible() async throws {
+    @Test("実際の月間カレンダーでも空と投入後の水位が表示される")
+    func calendarScreenRemainsVisible() async throws {
         for initiallyFilled in [false, true] {
-            try await captureList(initiallyFilled: initiallyFilled)
+            try await captureCalendar(initiallyFilled: initiallyFilled)
         }
         let beer = FluidControls()
         beer.configuration.kind = .beer
         try await capture(LiquidFillDemoView(controls: beer, openSettings: {}, initiallyFilled: true),
-                          name: "liquid-fill-list-beer")
+                          name: "liquid-calendar-beer")
         beer.configuration.color = .green
         try await capture(LiquidFillDemoView(controls: beer, openSettings: {}, initiallyFilled: true),
-                          name: "liquid-fill-list-green-beer")
+                          name: "liquid-calendar-green-beer")
     }
 
-    private func captureList(initiallyFilled: Bool) async throws {
+    private func captureCalendar(initiallyFilled: Bool) async throws {
         try await capture(LiquidFillDemoView(controls: FluidControls(), openSettings: {},
                                              initiallyFilled: initiallyFilled),
-                          name: initiallyFilled ? "liquid-fill-list-full" : "liquid-fill-list-empty")
+                          name: initiallyFilled ? "liquid-calendar-full" : "liquid-calendar-empty")
     }
 
     @Test("注ぐ・溜めるの各Tabで画面とTabバーが表示される")
@@ -83,7 +86,7 @@ struct LiquidFillRenderingTests {
             window.isHidden = true
             previousKeyWindow?.makeKey()
         }
-        // 実際のListをレイアウト・描画させてから採取する。ImageRendererだけでは検証しない。
+        // 実際のカレンダーをレイアウト・描画させてから採取する。ImageRendererだけでは検証しない。
         try await Task.sleep(for: .milliseconds(500))
         controller.view.layoutIfNeeded()
         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
