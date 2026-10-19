@@ -4,10 +4,11 @@ import SwiftUI
 struct LiquidOverlayModifier: ViewModifier {
     let controls: FluidControls
     let ignoresSafeArea: Bool
+    var isActive = true
 
     func body(content: Content) -> some View {
         content.overlay {
-            LiquidOverlay(controls: controls)
+            LiquidOverlay(controls: controls, isActive: isActive)
                 .ignoresSafeArea(.all, edges: ignoresSafeArea ? .all : [])
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
