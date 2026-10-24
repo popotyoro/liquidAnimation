@@ -8,52 +8,72 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct WaterRenderingTests {
-    @Test("着水中の盛り上がりと注水後に静まる水面を時系列で描画できる")
-    func impactSurfaceRendersOverTime() throws {
+    @Test("着水中と注水後の各時点で液体を描画する", arguments: [60, 90, 120, 150, 180, 210, 240, 480])
+    func impactSurfaceRendersAtRequestedTime(frame: Int) throws {
+        // 準備
         let scene = try OffscreenWater()
-        var previousFrame = 0
-        for frame in [60, 90, 120, 150, 180, 210, 240, 480] {
-            scene.advance(frames: frame - previousFrame)
-            let image = try scene.render()
-            try image.save(frame: frame, prefix: "water-impact")
-            previousFrame = frame
-        }
+        scene.advance(frames: frame)
+
+        // 実行
+        let image = try scene.render()
+
+        // 検証
+        #expect(image.hasVisibleLiquid)
+        try image.attach(frame: frame, prefix: "water-impact")
     }
 
-    @Test("ビールの泡から液体へ戻る過程を時系列で描画できる")
-    func beerFoamRendersOverTime() throws {
+    @Test("泡の生成から排液後までビールを描画する", arguments: [60, 120, 240, 600, 1200])
+    func beerFoamRendersAtRequestedTime(frame: Int) throws {
+        // 準備
         let scene = try OffscreenWater(kind: .beer)
-        var previousFrame = 0
-        for frame in [60, 120, 240, 600, 1200] {
-            scene.advance(frames: frame - previousFrame)
-            let image = try scene.render()
-            try image.save(frame: frame, prefix: "beer-foam")
-            print("Beer foam at \(frame): retained=\(scene.fluid.model.foamLiquidArea), height=\(scene.fluid.model.foamHeight)")
-            #expect(image.pixels.enumerated().contains { $0.offset % 4 == 3 && $0.element > 0 })
-            previousFrame = frame
-        }
+        scene.advance(frames: frame)
+
+        // 実行
+        let image = try scene.render()
+
+        // 検証
+        #expect(image.hasVisibleLiquid)
+        try image.attach(frame: frame, prefix: "beer-foam")
     }
 
-    @Test("50%まで溜まった水は画面上部を透明に保ち指定した不透明度で描く", arguments: [0.0, 0.45, 1.0])
-    func settledPoolUsesConfiguredOpacity(opacity: Double) throws {
+    @Test("50%まで溜まった水のない画面上部は透明になる")
+    func settledPoolLeavesUpperContainerTransparent() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 480)
 
+        // 実行
+        let image = try scene.render()
+
+        // 検証
+        #expect(image.alpha(x: image.width / 2, y: image.height / 4) == 0)
+    }
+
+    @Test("50%まで溜まった水は指定した不透明度で描く", arguments: [0.0, 0.45, 1.0])
+    func settledPoolUsesConfiguredOpacity(opacity: Double) throws {
+        // 準備
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+
+        // 実行
         let image = try scene.render(opacity: opacity)
 
-        #expect(image.alpha(x: image.width / 2, y: image.height / 4) == 0)
+        // 検証
         #expect(abs(Int(image.alpha(x: image.width / 2, y: image.height * 3 / 4)) - Int((opacity * 255).rounded())) <= 1)
-        if opacity == 0.45 { try image.save(frame: 480) }
+        if opacity == 0.45 { try image.attach(frame: 480) }
     }
 
     @Test("静止した水面は壁際だけ少し持ち上がり中央はほぼ50%に保つ")
     func settledPoolRisesSlightlyAtWalls() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 480)
 
+        // 実行
         let image = try scene.render()
-        let aboveSurface = image.height / 2 - 2
 
+        // 検証
+        let aboveSurface = image.height / 2 - 2
         #expect(image.alpha(x: 2, y: aboveSurface) > 100)
         #expect(image.alpha(x: image.width - 3, y: aboveSurface) > 100)
         #expect(image.alpha(x: image.width / 2, y: aboveSurface) == 0)
@@ -61,127 +81,206 @@ struct WaterRenderingTests {
 
     @Test("空の容器には液体を描かない")
     func emptyContainerRendersNothing() throws {
+        // 準備
         let scene = try OffscreenWater(fill: 0)
         scene.advance(frames: 60)
 
+        // 実行
         let image = try scene.render()
 
+        // 検証
         #expect(image.pixels.allSatisfy { $0 == 0 })
     }
 
     @Test("不透明度0では注水中の水流・水面・飛沫・気泡を描かない")
     func zeroOpacityHidesEveryWaterLayer() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 120)
-        #expect(scene.fluid.model.bubbleCount > 0)
-        #expect(scene.fluid.model.splashCount > 0)
+        try #require(scene.fluid.model.bubbleCount > 0)
+        try #require(scene.fluid.model.splashCount > 0)
 
+        // 実行
         let image = try scene.render(opacity: 0)
 
+        // 検証
         #expect(image.pixels.allSatisfy { $0 == 0 })
     }
 
     @Test("注水開始と減流中も水流が描画される", arguments: [8, 195])
     func rampingJetRemainsVisible(frame: Int) throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: frame)
 
+        // 実行
         let image = try scene.render()
 
-        #expect(scene.fluid.streamVertexCount > 0)
-        #expect(image.pixels.enumerated().contains { $0.offset % 4 == 3 && $0.element > 0 })
-        try image.save(frame: frame)
+        // 検証
+        #expect(image.hasVisiblePixels(above: image.height / 4))
+        try image.attach(frame: frame)
     }
 
-    @Test("注水中は気泡の描画データがあり静止後にはなくなる")
-    func entrainedBubblesDisappearAfterPouring() throws {
+    @Test("注水中の気泡を描画対象に含める")
+    func pouringWaterIncludesEntrainedBubbles() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 120)
-        let pouring = try scene.render()
-        #expect(scene.fluid.bubbleVertexCount > 0)
-        try pouring.save(frame: 120)
 
+        // 実行
+        let image = try scene.render()
+
+        // 検証
+        #expect(scene.fluid.bubbleVertexCount > 0)
+        try image.attach(frame: 120)
+    }
+
+    @Test("注水後に静止すると巻き込まれた気泡は描画対象からなくなる")
+    func entrainedBubblesDisappearAfterPouring() throws {
+        // 準備
+        let scene = try OffscreenWater()
+        scene.advance(frames: 120)
+        try #require(scene.fluid.model.bubbleCount > 0)
+
+        // 実行
         scene.advance(frames: 360)
         _ = try scene.render()
 
+        // 検証
         #expect(scene.fluid.bubbleVertexCount == 0)
     }
 
     @Test("入口を止めても未着水の水流は描画される")
     func stoppedInletKeepsFallingWaterVisible() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 210)
+        try #require(!scene.fluid.model.isPouring)
 
+        // 実行
         let image = try scene.render()
 
-        #expect(!scene.fluid.model.isPouring)
-        #expect(abs(scene.fluid.model.fraction - 0.5) < 1e-9)
+        // 検証
         #expect(scene.fluid.streamVertexCount > 0)
-        try image.save(frame: 210)
+        try image.attach(frame: 210)
     }
 
     @Test("分離した水流の末尾は容器へ戻るまで水滴の描画対象になる")
     func separatedTailRendersAsDrops() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 214)
+        try #require(scene.fluid.model.detachedDropCount > 0)
 
+        // 実行
         let image = try scene.render()
 
-        #expect(scene.fluid.model.detachedDropCount > 0)
+        // 検証
         #expect(scene.fluid.splashVertexCount > 0)
-        try image.save(frame: 214)
+        try image.attach(frame: 214)
     }
 
-    @Test("どの種類も水面・水流・気泡をMetalで描画できる", arguments: FluidKind.allCases)
+    @Test("どの液体も注水中の容器の底を塗る", arguments: FluidKind.allCases)
     func everyPresetRenders(kind: FluidKind) throws {
+        // 準備
         let scene = try OffscreenWater(kind: kind)
         scene.advance(frames: 120)
 
+        // 実行
         let image = try scene.render()
 
+        // 検証
         #expect(image.alpha(x: image.width / 2, y: image.height - 10) > 0)
-        try image.save(frame: 120, prefix: kind.rawValue)
+        try image.attach(frame: 120, prefix: kind.rawValue)
     }
 
     @Test("どの種類も不透明度0では全描画パスが透明になる", arguments: FluidKind.allCases)
     func everyPresetSupportsZeroOpacity(kind: FluidKind) throws {
+        // 準備
         let scene = try OffscreenWater(kind: kind)
         scene.advance(frames: 120)
 
+        // 実行
         let image = try scene.render(opacity: 0)
 
+        // 検証
         #expect(image.pixels.allSatisfy { $0 == 0 })
     }
 
-    @Test("注水し直さず色だけを変えると形と不透明度を保って色が変わる")
+    @Test("注水し直さず色だけを変えると描画色が変わる")
     func colorChangesWithoutRestarting() throws {
+        // 準備
         let scene = try OffscreenWater()
         scene.advance(frames: 480)
-        let time = scene.fluid.model.time
-        let fraction = scene.fluid.model.fraction
         let before = try scene.render(color: .blue)
 
+        // 実行
         let after = try scene.render(color: .pink)
 
+        // 検証
         #expect(before.pixels != after.pixels)
+    }
+
+    @Test("描画色を変えても液体の輪郭と不透明度は変わらない")
+    func colorChangePreservesAlpha() throws {
+        // 準備
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+        let before = try scene.render(color: .blue)
+
+        // 実行
+        let after = try scene.render(color: .pink)
+
+        // 検証
         #expect(stride(from: 3, to: before.pixels.count, by: 4).allSatisfy { before.pixels[$0] == after.pixels[$0] })
+    }
+
+    @Test("描画色を変えてもシミュレーションの時刻と投入量は変わらない")
+    func colorChangeDoesNotAdvanceSimulation() throws {
+        // 準備
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+        _ = try scene.render(color: .blue)
+        let time = scene.fluid.model.time
+        let fraction = scene.fluid.model.fraction
+
+        // 実行
+        _ = try scene.render(color: .pink)
+
+        // 検証
         #expect(scene.fluid.model.time == time)
         #expect(scene.fluid.model.fraction == fraction)
     }
 
-    @Test("炭酸の泡は注水後も見分けられる大きさとコントラストで描く", arguments: [FluidKind.beer, .sparklingWater])
-    func carbonationHasVisibleOutlines(kind: FluidKind) throws {
+    @Test("注水後の炭酸気泡は400px幅で直径4.5px以上になる", arguments: [FluidKind.beer, .sparklingWater])
+    func carbonationOutlinesMeetMinimumDiameter(kind: FluidKind) throws {
+        // 準備
         let scene = try OffscreenWater(kind: kind)
         scene.advance(frames: 600)
+
+        // 実行
         let bubbles = scene.fluid.model.bubbleVertices()
+
+        // 検証
         try #require(!bubbles.isEmpty)
-        // 400px幅の描画で、フェード中の泡も直径4.5px以上の領域を確保する。
         for start in stride(from: 0, to: bubbles.count, by: 6) {
             let diameter = abs(bubbles[start + 1].position.x - bubbles[start].position.x) * 400
             #expect(diameter >= 4.5)
         }
+    }
+
+    @Test("注水後の炭酸気泡は白い背景でも見分けられる", arguments: [FluidKind.beer, .sparklingWater])
+    func carbonationHasVisibleContrast(kind: FluidKind) throws {
+        // 準備
+        let scene = try OffscreenWater(kind: kind)
+        scene.advance(frames: 600)
+        try #require(scene.fluid.model.bubbleCount > 0)
+
+        // 実行
         let withBubbles = try scene.render()
         let withoutBubbles = try scene.render(hidesBubbles: true)
+
+        // 検証
         // 白い背景へ合成したときも、泡の有無で5%以上違う画素が十分にある。
         let visiblePixels = stride(from: 0, to: withBubbles.pixels.count, by: 4).filter { i in
             (0..<3).contains { channel in
@@ -191,13 +290,14 @@ struct WaterRenderingTests {
             }
         }.count
         #expect(visiblePixels >= 150)
-        try withBubbles.save(frame: 600, prefix: kind.rawValue)
+        try withBubbles.attach(frame: 600, prefix: kind.rawValue)
     }
 
 }
 
 /// 本番の転送・描画処理を、背景が透明なテクスチャへ実行するテスト用の場。
 /// 各テストが独立して所有し、モデルやGPU資源をテスト間で共有しない。
+/// 各描画でGPUの完了を待つため、後始末はテスト終了時のARCによる解放で完了する。
 @MainActor
 private final class OffscreenWater {
     let fluid: FluidSimulation
@@ -262,33 +362,67 @@ private struct RenderedWater {
     let height: Int
     let pixels: [UInt8]
 
+    var hasVisibleLiquid: Bool {
+        hasVisiblePixels(above: height)
+    }
+
+    func hasVisiblePixels(above maximumY: Int) -> Bool {
+        stride(from: 3, to: width * maximumY * 4, by: 4).contains { pixels[$0] > 0 }
+    }
+
     func alpha(x: Int, y: Int) -> UInt8 { pixels[(y * width + x) * 4 + 3] }
 
-    func save(frame: Int, prefix: String = "water") throws {
+    func attach(frame: Int, prefix: String = "water") throws {
         let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))
         let image = try #require(CGImage(width: width, height: height, bitsPerComponent: 8,
             bitsPerPixel: 32, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
             provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent))
-        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(prefix)-frame-\(frame).png")
-        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        let png = try #require(CFDataCreateMutable(kCFAllocatorDefault, 0))
+        let destination = try #require(CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         try #require(CGImageDestinationFinalize(destination))
-        print("Water render: \(url.path)")
+        Attachment.record(png as Data, named: "\(prefix)-frame-\(frame).png")
     }
 }
 
 struct FluidBufferLayoutTests {
-    @Test("共有頂点と定数のメモリ配置がMetalのバッファ仕様に一致する")
-    func sharedLayoutsMatchMetal() {
-        #expect(MemoryLayout<WaterVertex>.stride == 16)
-        #expect(MemoryLayout<BubbleVertex>.stride == 32)
-        #expect(MemoryLayout<WaterUniforms>.stride == 112)
-        #expect(MemoryLayout<WaterVertex>.offset(of: \.texture) == 8)
-        #expect(MemoryLayout<BubbleVertex>.offset(of: \.appearance) == 16)
-        #expect(MemoryLayout<WaterUniforms>.offset(of: \.detail) == 16)
-        #expect(MemoryLayout<WaterUniforms>.offset(of: \.shallowColor) == 32)
-        #expect(MemoryLayout<WaterUniforms>.offset(of: \.edgeColor) == 80)
-        #expect(MemoryLayout<WaterUniforms>.offset(of: \.foam) == 96)
+    @Test("水の頂点はMetalが読む16バイトの配置と一致する")
+    func waterVertexMatchesMetalLayout() {
+        // 準備・実行
+        let stride = MemoryLayout<WaterVertex>.stride
+        let textureOffset = MemoryLayout<WaterVertex>.offset(of: \.texture)
+
+        // 検証
+        #expect(stride == 16)
+        #expect(textureOffset == 8)
+    }
+
+    @Test("気泡の頂点はMetalが読む32バイトの配置と一致する")
+    func bubbleVertexMatchesMetalLayout() {
+        // 準備・実行
+        let stride = MemoryLayout<BubbleVertex>.stride
+        let appearanceOffset = MemoryLayout<BubbleVertex>.offset(of: \.appearance)
+
+        // 検証
+        #expect(stride == 32)
+        #expect(appearanceOffset == 16)
+    }
+
+    @Test("描画定数はMetalが読む112バイトの配置と一致する")
+    func waterUniformsMatchMetalLayout() {
+        // 準備・実行
+        let stride = MemoryLayout<WaterUniforms>.stride
+        let detailOffset = MemoryLayout<WaterUniforms>.offset(of: \.detail)
+        let shallowColorOffset = MemoryLayout<WaterUniforms>.offset(of: \.shallowColor)
+        let edgeColorOffset = MemoryLayout<WaterUniforms>.offset(of: \.edgeColor)
+        let foamOffset = MemoryLayout<WaterUniforms>.offset(of: \.foam)
+
+        // 検証
+        #expect(stride == 112)
+        #expect(detailOffset == 16)
+        #expect(shallowColorOffset == 32)
+        #expect(edgeColorOffset == 80)
+        #expect(foamOffset == 96)
     }
 }

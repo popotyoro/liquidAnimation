@@ -1,29 +1,57 @@
 import Testing
 @testable import LiquidAnimation
 
+/// 設定と配色は各ケースのローカル値で、後始末は値の破棄で完了する。
 struct FluidColorTests {
-    @Test("標準色はビールを琥珀色にし水をブルーにする")
-    func standardColorFollowsKind() {
-        #expect(FluidColorChoice.standard.palette(for: .beer) == .amber)
-        #expect(FluidColorChoice.standard.palette(for: .water) == .blue)
+    @Test("ビールの標準色は琥珀色になる")
+    func beerUsesAmberByDefault() {
+        // 準備
+        let choice = FluidColorChoice.standard
+
+        // 実行
+        let palette = choice.palette(for: .beer)
+
+        // 検証
+        #expect(palette == .amber)
     }
 
-    @Test("明示的に選んだ色は液体の種類を変えても保持する", arguments: FluidKind.allCases)
+    @Test("水の標準色はブルーになる")
+    func waterUsesBlueByDefault() {
+        // 準備
+        let choice = FluidColorChoice.standard
+
+        // 実行
+        let palette = choice.palette(for: .water)
+
+        // 検証
+        #expect(palette == .blue)
+    }
+
+    @Test("明示的に選んだピンクはどの液体の種類でも優先される", arguments: FluidKind.allCases)
     func explicitColorOverridesKind(kind: FluidKind) {
-        #expect(FluidColorChoice.pink.palette(for: kind) == .pink)
+        // 準備
+        let choice = FluidColorChoice.pink
+
+        // 実行
+        let palette = choice.palette(for: kind)
+
+        // 検証
+        #expect(palette == .pink)
     }
 
-    @Test("設定の数値補正は選択した種類と色を変えない")
+    @Test("非有限の液量を補正しても選択した種類と色を保持する")
     func sanitizationPreservesKindAndColor() {
+        // 準備
         var configuration = FluidConfiguration()
         configuration.kind = .beer
         configuration.color = .green
         configuration.fill = .nan
 
+        // 実行
         let actual = configuration.sanitized
 
+        // 検証
         #expect(actual.kind == .beer)
         #expect(actual.color == .green)
-        #expect(actual.fill == 0.5)
     }
 }

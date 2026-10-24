@@ -1,20 +1,32 @@
-import Foundation
 import SwiftUI
 import Testing
 import UIKit
 @testable import LiquidAnimation
 
+/// 後始末はテスト所有の設定・描画器・画像の解放で完結する。
 @MainActor
 struct FluidControlBarRenderingTests {
-    @Test("注水バーの操作と計測値を通常・拡大文字で描画できる",
+    @Test("通常文字と拡大文字の注水バーに最新の計測値が反映される",
           arguments: [DynamicTypeSize.large, .xxxLarge])
-    func metricsRemainVisible(textSize: DynamicTypeSize) throws {
+    func metricsChangesAreRendered(textSize: DynamicTypeSize) throws {
+        // 準備
         let controls = FluidControls()
+        controls.insertedFraction = 0.5
+        let before = try render(controls: controls, textSize: textSize, name: "controls-before-\(textSize)")
+
+        // 実行
         controls.framesPerSecond = 60
         controls.gpuMilliseconds = 1.2
         controls.simulationMilliseconds = 3.4
-        controls.insertedFraction = 0.5
+        let after = try render(controls: controls, textSize: textSize, name: "controls-after-\(textSize)")
 
+        // 検証
+        #expect(after.darkPixelCount > 100)
+        #expect(try after.differingPixelCount(from: before) > 20)
+    }
+
+    private func render(controls: FluidControls, textSize: DynamicTypeSize,
+                        name: String) throws -> RenderedTestImage {
         let content = FluidControlBar(controls: controls, openSettings: {})
             .frame(width: 360)
             .padding(16)
@@ -23,11 +35,6 @@ struct FluidControlBarRenderingTests {
             .environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
-        let image = try #require(renderer.cgImage)
-        let data = try #require(UIImage(cgImage: image).pngData())
-        let name = textSize == .large ? "standard" : "large-text"
-        let url = URL.temporaryDirectory.appendingPathComponent("fluid-controls-\(name).png")
-        try data.write(to: url)
-        print("Control bar render: \(url.path)")
+        return try RenderedTestImage(try #require(renderer.uiImage), name: name)
     }
 }
