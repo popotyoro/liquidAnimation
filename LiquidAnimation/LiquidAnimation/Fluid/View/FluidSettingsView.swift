@@ -23,7 +23,7 @@ struct FluidSettingsView: View {
                 } header: {
                     Text("液体")
                 } footer: {
-                    Text("注ぐ画面の種類は次に「注ぐ」を押すと反映します。溜める画面の配色と、色・不透明度はすぐに反映します。")
+                    Text("注ぐ画面の種類は次に「注ぐ」を押すと反映します。カレンダー画面の配色と、色・不透明度はすぐに反映します。")
                 }
                 Section {
                     setting("注ぐ位置", value: $controls.configuration.sourcePosition,

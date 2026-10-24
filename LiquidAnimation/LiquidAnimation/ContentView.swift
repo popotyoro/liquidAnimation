@@ -17,7 +17,7 @@ struct ContentView: View {
                     showsSettings = true
                 }
             }
-            Tab("溜める", systemImage: "rectangle.stack", value: LiquidDemoTab.fill) {
+            Tab("カレンダー", systemImage: "calendar", value: LiquidDemoTab.fill) {
                 LiquidFillDemoView(controls: controls, openSettings: { showsSettings = true })
             }
         }

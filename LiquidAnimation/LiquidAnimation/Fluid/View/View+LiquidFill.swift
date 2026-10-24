@@ -2,6 +2,7 @@ import SwiftUI
 
 extension View {
     /// 下から指定割合まで塗る。withAnimationで割合を変えると水位が補間される。
+    /// 割合の変更から2.6秒間だけ小さな波を重ね、最後は平らな水面に戻す。
     /// タッチ・レイアウトは変えず、角丸などのクリップは呼び出し側で指定する。
     /// 範囲外は0...1に補正し、NaN・無限大は0として扱う。
     func liquidFill(fraction: Double, color: Color = .cyan.opacity(0.3)) -> some View {
