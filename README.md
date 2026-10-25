@@ -25,7 +25,7 @@ Xcodeの「Add Package Dependencies」でGitHubのリポジトリURLを指定し
 
 デモは`LiquidAnimation/LiquidAnimation.xcodeproj`を開く。`LiquidAnimation`スキームはリポジトリのルートを相対パスで参照する。デモアプリはSwift Packageのターゲットに含めない。Metalシェーダーはパッケージに同梱され、利用側でコピーする必要はない。
 
-`LiquidAnimation/Package.swift`は、Xcodeのルートパッケージ表示からデモを除外するための空の定義。表示が残っている場合はXcodeプロジェクトを開き直す。
+`LiquidAnimation/Package.swift`は、Xcodeでパッケージを単独で開いた場合やGitHubから参照した場合に、デモフォルダを表示から除外するための空の定義。ローカル依存ではデモフォルダが表示される場合があるが、パッケージのビルド対象には含まれない。
 
 ## 注水する
 
