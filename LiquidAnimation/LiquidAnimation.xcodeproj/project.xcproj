@@ -11,6 +11,7 @@
     ],
   },
   "files": [
+    { "path": "../Tests/LiquidFluidTests/RenderedTestImage.swift", "target-membership": ["LiquidAnimationTests/compile-sources"] },
     { "kind": "folder", "path": "LiquidAnimation", "target-membership": [ "LiquidAnimation" ] },
     { "kind": "folder", "path": "LiquidAnimationTests", "target-membership": [ "LiquidAnimationTests" ] },
     {
@@ -29,9 +30,12 @@
       ],
     },
   ],
+  "packages": [{ "kind": "local", "path": ".." }],
   "targets": [
     {
       "name": "LiquidAnimation",
+      "dependencies": [{ "kind": "package", "product-name": "LiquidFluid" }],
+      "package-product-members": [{ "product-name": "LiquidFluid", "build-phase": { "build-phase": "frameworks" } }],
       "id": "EA41801C308399610015D799",
       "product": "Products/LiquidAnimation.app",
       "product-type": "application",
@@ -88,6 +92,8 @@
       },
     }, {
       "name": "LiquidAnimationTests",
+      "dependencies": ["LiquidAnimation", { "kind": "package", "product-name": "LiquidFluid" }],
+      "package-product-members": [{ "product-name": "LiquidFluid", "build-phase": { "build-phase": "frameworks" } }],
       "id": "EAB9541E3083A88D004A7FEE",
       "product": "Products/LiquidAnimationTests.xctest",
       "product-type": "bundle.unit-test",

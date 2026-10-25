@@ -4,12 +4,15 @@
 
 SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iOS アプリ。長方形の容器、2D の流体計算、設定可能な液量と不透明度、60fps を目標とする。要件と数式は `docs/liquid-animation-spec.md` を参照し、仕様を変更した場合は同時に更新する。
 
+- `Package.swift`：Swift tools 6.4によるライブラリとテストの定義。
+- `Tests/LiquidFluidTests/`：ライブラリのテスト。
+- `LiquidAnimation/LiquidAnimation/Demo/`：デモ専用の画面・設定UI・カレンダー。
 - `LiquidAnimation/LiquidAnimation.xcodeproj`：Xcode プロジェクト。
 - `LiquidAnimation/LiquidAnimation/ContentView.swift`：サンプル画面と設定 UI。
-- `LiquidAnimation/LiquidAnimation/Fluid/View/`：SwiftUIの入口、modifier、`MTKView`の組み込み。
-- `LiquidAnimation/LiquidAnimation/Fluid/Model/`：設定・操作状態、水滴・気泡などのデータ型。
-- `LiquidAnimation/LiquidAnimation/Fluid/Simulation/`：浅水モデル、注水曲線、数式、再生制御。
-- `LiquidAnimation/LiquidAnimation/Fluid/Rendering/`：Metal描画、共有バッファ、頂点・定数、描画エラー。
+- `Sources/LiquidFluid/View/`：SwiftUIの入口、modifier、`MTKView`の組み込み。
+- `Sources/LiquidFluid/Model/`：設定・操作状態、水滴・気泡などのデータ型。
+- `Sources/LiquidFluid/Simulation/`：浅水モデル、注水曲線、数式、再生制御。
+- `Sources/LiquidFluid/Rendering/`：Metal描画、共有バッファ、頂点・定数、描画エラー。
 - `LiquidAnimation/LiquidAnimation/Assets.xcassets`：色。
 - `LiquidAnimation/LiquidAnimation/AppIcon.icon`：Icon Composerのアプリアイコン。
 
@@ -25,13 +28,13 @@ Metalの処理・起動方式を変更した場合は、描画テストに加え
 
 設定の確認・変更には `GetTargetBuildSettings` と `UpdateTargetBuildSetting` を使う。`project.pbxproj` を直接編集しない。Metal ツールチェーンなどの環境不足は報告し、無断で別のビルド方式へ切り替えない。
 
-本体変更後にテストを実行する際は、先に `LiquidAnimation` スキームで `BuildProject` を実行し、続いて `LiquidAnimationTests` スキームでテストする。現在のテストホストの依存関係は自動解決されず、テストだけの実行では古い本体を参照し得る。
+変更後は、先に `LiquidAnimation` スキームで `BuildProject` を実行してパッケージとのリンクを確認する。ライブラリのテストはリポジトリのルートを `XcodeOpenWorkspace` で開き、`LiquidFluid` スキームを使う。デモのテストはプロジェクト側の `LiquidAnimationTests` スキームで実行する。
 
 ## コードの書き方
 
 インデントはスペース4つ。型は `UpperCamelCase`、変数・関数は `lowerCamelCase`、Swiftは原則1ファイル1型とし、ファイル名は型名に合わせる。View拡張は `View+LiquidOverlay.swift`、特定の型に属する補助型は `WaterModel+Drop.swift` のように所属を表す。現時点で専用のフォーマッターやリンターは導入していない。
 
-アプリとテストは Swift 6、`SWIFT_STRICT_CONCURRENCY = complete` を使用する。アプリは既定の MainActor 隔離を利用し、型への重複した `@MainActor` は省く。UI・水面モデル・描画バッファの変更をこの隔離内に保つ。Metal の完了通知は `@Sendable` とし、値を取り出してから `Task { @MainActor in ... }` で戻す。前のGPUコマンドが完了するまで共有バッファを書き換えない。共有する値型は `Sendable` にする。警告回避のためにチェックを弱めたり、`@unchecked Sendable` を追加したりしない。
+アプリとパッケージはSwift 6モードの完全な並行性チェックを使う。パッケージでもApproachable ConcurrencyとMember Import Visibilityを有効にする。アプリとライブラリは既定の MainActor 隔離を利用し、型への重複した `@MainActor` は省く。UI・水面モデル・描画バッファの変更をこの隔離内に保つ。Metal の完了通知は `@Sendable` とし、値を取り出してから `Task { @MainActor in ... }` で戻す。前のGPUコマンドが完了するまで共有バッファを書き換えない。共有する値型は `Sendable` にする。警告回避のためにチェックを弱めたり、`@unchecked Sendable` を追加したりしない。
 
 SwiftUI は設定と操作、CPU は浅水モデルと液量の計算、Metal は水面と水流の描画を担当する。毎フレームの粒子データを SwiftUI の状態へ流さず、表示する計測値の更新頻度を抑える。Swift と Metal で共有する構造体は、フィールド順序・型・メモリアラインメントを一致させる。
 
@@ -52,7 +55,7 @@ SwiftUI は設定と操作、CPU は浅水モデルと液量の計算、Metal �
 
 ただし、描画変更時はコミット前まで待たず、描画テストで時間ごとの画像を出力して実際に目視確認する。ビルド・起動の成功だけで見た目を確認済みとしない。振る舞いのテスト整備と全件実行はコミット前にまとめてよい。
 
-Swift Testing の `LiquidAnimationTests` ターゲットを使用する。カバレッジ基準は未設定。コミット前には MCP のビルド確認に加え、0%・50%・100% の投入量、液量の保存、非有限値、波の減衰、一時停止・リセットを確認する。`LiquidAnimationTests` スキームで `RunAllTests` または `RunSomeTests` を使う。実行先は iPhone 18 Pro とし、iPhone Duo およびDuoを選ぶ可能性があるプレビュー経由の検証は使用しない。60fps の達成は実機で測定し、シミュレータの結果と区別する。
+Swift Testingの`LiquidFluidTests`（ライブラリ）と`LiquidAnimationTests`（デモ）を使用する。カバレッジ基準は未設定。コミット前には MCP のビルド確認に加え、0%・50%・100% の投入量、液量の保存、非有限値、波の減衰、一時停止・リセットを確認する。対象のスキームで `RunAllTests` または `RunSomeTests` を使う。実行先は iPhone 18 Pro とし、iPhone Duo およびDuoを選ぶ可能性があるプレビュー経由の検証は使用しない。60fps の達成は実機で測定し、シミュレータの結果と区別する。
 
 テスト設計はt-wadaの重視する振る舞い・再現性・独立性を基準とする。
 

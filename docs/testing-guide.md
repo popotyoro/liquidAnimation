@@ -31,7 +31,7 @@ PNGや計測レポートはメモリから`Attachment.record`で現在のテス�
 
 Sceneへの接続が必要な`NavigationStack`・`TabView`の画面全体、実際のキーフレーム再生、タッチ・VoiceOver・「視差効果を減らす」の端末設定は、この並列ユニットテストだけでは確認できない。画面全体の確認は通常起動で別途行う。
 
-ビルド・実行・テストは[AGENTS.md](../AGENTS.md)に従ってXcode MCPを使い、iPhone 18 Proを選ぶ。MCPが返す`.xcresult`には画像とレポートが添付される。性能レポートは合否の速度基準ではなく、計測条件をそろえて比較するための資料である。
+ビルド・実行・テストは[AGENTS.md](../AGENTS.md)に従ってXcode MCPを使い、iPhone 18 Proを選ぶ。ライブラリはリポジトリのルートをパッケージとして開いた`LiquidFluid`スキーム、デモはプロジェクトの`LiquidAnimationTests`スキームで検証する。MCPが返す`.xcresult`には画像とレポートが添付される。性能レポートは合否の速度基準ではなく、計測条件をそろえて比較するための資料である。
 
 ## 参照
 

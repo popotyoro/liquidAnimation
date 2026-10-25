@@ -71,6 +71,9 @@ A_{pool}=\int_0^W h(x)\,dx
 任意のViewへ `.liquidOverlay(controls:ignoresSafeArea:isActive:)` を適用する。操作状態は呼び出し側が保持し、再描画のたびに作り直さない。
 
 ```swift
+import LiquidFluid
+import SwiftUI
+
 @State private var controls = FluidControls()
 
 var body: some View {
@@ -83,7 +86,7 @@ var body: some View {
 
 `ignoresSafeArea` の既定値は `false`。通常は適用先の領域に重ね、`true`なら液体レイヤーだけをセーフエリアまで広げる。背景のレイアウトサイズは変更しない。デモでは画面上端から注ぐため `true` を指定する。
 
-`View`拡張は内部の`LiquidOverlayModifier: ViewModifier`を呼び出す入口とする。重ね合わせ、セーフエリア、タッチの透過、アクセシビリティからの除外はこのmodifier内で設定する。`LiquidOverlay`はモジュール内部の実装とし、利用側での`ZStack`や`.overlay`の指定は不要。現在はアプリ内のAPIであり、別パッケージ向けの`public`宣言は行っていない。
+`View`拡張は内部の`LiquidOverlayModifier: ViewModifier`を呼び出す入口とする。重ね合わせ、セーフエリア、タッチの透過、アクセシビリティからの除外はこのmodifier内で設定する。`LiquidOverlay`はモジュール内部の実装とし、利用側での`ZStack`や`.overlay`の指定は不要。`LiquidFluid`の公開APIとして提供し、デモアプリはこのパッケージをリンクする。設定・操作型とmodifierを公開し、物理モデル・描画資源は内部に隠す。
 
 ### 記録済み量の表示と追加注水
 
@@ -222,7 +225,7 @@ Metalでは透明な中心、明暗のある縁、小さな反射光を描く。
 
 物理計算はSwiftでCPU上に実装し、MetalはGPU上で描画を行う。表示水面の事前計算にはMetalの計算シェーダーを使う。
 
-Fluid内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`Model/`、計算と再生制御を`Simulation/`、GPUへの転送と描画を`Rendering/`に分ける。`WaterModel`は水深などの更新を実行するため`Simulation/`に置く。下表のFluid内のパスは、このディレクトリを基準とする。
+`Sources/LiquidFluid/`内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`Model/`、計算と再生制御を`Simulation/`、GPUへの転送と描画を`Rendering/`に分ける。`WaterModel`は水深などの更新を実行するため`Simulation/`に置く。下表のライブラリ内のパスは、このディレクトリを基準とする。デモ専用UIとカレンダーはアプリ側の`Demo/`に置く。
 
 | 担当箇所 | 責務 |
 | --- | --- |
@@ -244,9 +247,9 @@ Fluid内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`
 | `Rendering/FrameRateMeter.swift` | 0.5秒ごとの完了フレーム集計。時刻は呼び出し側から渡す |
 | `Rendering/WaterRenderPipelines.swift` | Metalの合成設定と描画順。アプリとオフスクリーン検証で共用 |
 | `Rendering/FluidPalette.swift` | 種類と色から選ぶ、浅部・深部・水流の配色 |
-| `View/FluidControlBar.swift` | 注水・一時停止・リセット・設定への入口と計測表示 |
-| `View/FluidMetricsView.swift` | FPS・GPU・CPUの計測値だけを監視する表示 |
-| `View/FluidSettingsView.swift` | 種類・色・注ぎ方の設定画面 |
+| アプリの`Demo/View/FluidControlBar.swift` | 注水・一時停止・リセット・設定への入口と計測表示 |
+| アプリの`Demo/View/FluidMetricsView.swift` | FPS・GPU・CPUの計測値だけを監視する表示 |
+| アプリの`Demo/View/FluidSettingsView.swift` | 種類・色・注ぎ方の設定画面 |
 | `Rendering/FluidError.swift` | Metal初期化・描画のエラー情報 |
 | `Rendering/Fluid.metal` | 色、不透明度、輪郭、ハイライト、気泡の縁、水中模様の描画 |
 
@@ -261,6 +264,8 @@ Fluid内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`
 溜まった水の上端には、壁際で持ち上がるメニスカスと、着水圧力に応じた細かい波を描画時に加える。壁際の持ち上がりは画面幅の最大0.75%、細かい波は最大0.25%を基準とし、空・満水に近づくと消す。持ち上がりの平均を引いて水位の偏りを抑えるが、表示上の輪郭は物理モデルの水位とは異なる。細かい波は着水圧力とともに減衰し、一時停止中は動かない。傾きで途切れる反射光で上端の丸みを表す。水面直下に輪郭をなぞる暗い線は付けない。着水点の両側には、着水圧力に応じた小さな肩状の盛り上がりを描画上で加える。毎秒2.1周期、半周期ずらした2つのパルスを重ね、正規化年齢`a`（0〜1）に対し距離`0.018＋0.080a`、幅`0.010＋0.020a`（ともに画面幅基準）のガウス形を左右へ移す。振幅の係数は画面幅の3.5%×圧力強度×`sin²(πa)`。着水中心では変形をゼロにし、水流との接続を保つ。空・満水付近の抑制を共用し、圧力が消えると変形も消す。液量はCPUの水深・水流・飛沫で管理する。これは着水の視覚的な近似で、巻き返り・砕波・局所輸送の物理計算ではない。気泡のクリップも同じ表示用水面を使う。表面張力の計算や画面外への流出は行わない。
 
 描画順は水流→容器内の水→気泡→ビールの表面の泡→飛沫。水面より下の水流を容器内の水で覆い、気泡は水面より上を切り抜く。各パスは透明な描画先へalpha乗算済みの色を合成する。
+
+`Fluid.metal`はSwift Packageの処理対象リソースとして同梱し、`Bundle.module`を指定してMetalライブラリを読み込む。アプリの既定Metalライブラリには依存しない。
 
 `MTKView` を `UIViewRepresentable` で組み込む。毎フレームの水面データを SwiftUI の状態へ渡さず、計測表示は約0.5秒ごとに更新する。注水コントロールバーには、操作ボタンの下に描画頻度（fps）、GPU時間（ms）、物理計算のCPU時間（ms）を表示する。横幅に収まらない文字サイズでは縦並びに切り替える。計測値は設定画面には置かない。
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import Testing
 import UIKit
+@testable import LiquidFluid
 @testable import LiquidAnimation
 
 /// 後始末はテスト所有の設定・描画器・画像の解放で完結する。
