@@ -1,0 +1,45 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "extended-srgb:0.03529,0.23529,0.54118,1.00000",
+      "extended-srgb:0.01569,0.04706,0.16078,1.00000"
+    ]
+  },
+  "fill-specializations": [
+    {
+      "appearance": "dark",
+      "value": { "automatic-gradient": "extended-srgb:0.01961,0.05490,0.14510,1.00000" }
+    }
+  ],
+  "groups": [
+    {
+      "name": "Air Bubbles",
+      "shadow": { "kind": "none", "opacity": 0 },
+      "layers": [
+        { "name": "Bubbles", "image-name": "Bubbles.svg", "glass": true,
+          "position": { "scale": 1, "translation-in-points": [0, 0] } }
+      ]
+    },
+    {
+      "name": "Liquid Surface",
+      "lighting": "individual",
+      "translucency": { "enabled": true, "value": 0.12 },
+      "shadow": { "kind": "layer-color", "opacity": 0.25 },
+      "layers": [
+        { "name": "Wave", "image-name": "Wave.svg", "glass": true,
+          "position": { "scale": 1, "translation-in-points": [0, 0] } }
+      ]
+    },
+    {
+      "name": "Water Drop",
+      "lighting": "individual",
+      "translucency": { "enabled": true, "value": 0.18 },
+      "shadow": { "kind": "neutral", "opacity": 0.4 },
+      "layers": [
+        { "name": "Drop", "image-name": "Drop.svg", "glass": true,
+          "position": { "scale": 1, "translation-in-points": [0, 0] } }
+      ]
+    }
+  ],
+  "supported-platforms": { "squares": ["iOS"] }
+}

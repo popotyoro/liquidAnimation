@@ -111,4 +111,4 @@ MLXはAppleの機械学習研究チームが開発するOSSで、GitHubの公開
 
 ## アプリアイコン
 
-- [ ] Icon Composerで、液体アニメーションに合うアプリアイコンを作成する。
+- [x] Icon Composerで、水滴・波・気泡を重ねたアプリアイコンを作成する。[プレビュー](images/app-icon.png)
