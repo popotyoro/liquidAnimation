@@ -21,7 +21,7 @@ struct LiquidCalendarCell: View {
         }
         .frame(maxWidth: .infinity, minHeight: minimumHeight)
         .background(.background.opacity(day.isInMonth ? 1 : 0.35))
-        .liquidFill(fraction: day.fraction * progress, color: color)
+        .liquidFill(fraction: day.fraction * progress, color: color, animationTrigger: progress)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .opacity(day.isInMonth ? 1 : 0.35)
         .accessibilityElement(children: .ignore)

@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// 水位は呼び出し側が補間し、割合が変わったときだけ有限時間の波を重ねる。
+/// 水位は呼び出し側が補間し、状態変化のトリガーごとに有限時間の波を重ねる。
 struct LiquidFillModifier: ViewModifier {
     let fraction: Double
     let color: Color
+    let animationTrigger: Double
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content.overlay {
-            KeyframeAnimator(initialValue: 1.0, trigger: LiquidFillShape.boundedFraction(fraction)) { progress in
+            KeyframeAnimator(initialValue: 1.0, trigger: animationTrigger) { progress in
                 LiquidFillShape(fraction: LiquidFillShape.boundedFraction(fraction),
                                 waveProgress: reduceMotion ? 1 : progress)
                     .fill(color)
