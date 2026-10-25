@@ -424,21 +424,18 @@ struct FluidControlsTests {
         #expect(!controls.isPaused)
     }
 
-    @Test("注水を要求するたびにリセットとは別の再注水要求を発行する")
-    func repeatedPoursIssueNewRestartRequests() {
+    @Test("注ぎ直しの目標量には最新の設定量を使う")
+    func restartingUsesConfiguredTarget() {
         // 準備
         let controls = FluidControls()
         controls.pour()
-        let previousRestart = controls.restartID
-        let previousReset = controls.resetID
+        controls.configuration.fill = 0.7
 
         // 実行
         controls.pour()
 
         // 検証
-        #expect(previousRestart > 0)
-        #expect(controls.restartID == previousRestart + 1)
-        #expect(controls.resetID == previousReset)
+        #expect(controls.targetFraction == 0.7)
     }
 
     @Test("一時停止中にリセットすると空の初期表示で再生を再開する")
@@ -458,34 +455,33 @@ struct FluidControlsTests {
         #expect(controls.status == "注水して動きを確認")
     }
 
-    @Test("リセットは注水設定と再注水要求を変更しない")
+    @Test("リセットは注水設定を変更しない")
     func resetPreservesPourConfiguration() {
         // 準備
         let controls = FluidControls()
         controls.configuration.fill = 0.8
         let configuration = controls.configuration
-        let restart = controls.restartID
 
         // 実行
         controls.reset()
 
         // 検証
         #expect(controls.configuration == configuration)
-        #expect(controls.restartID == restart)
     }
 
-    @Test("リセットを要求するたびに新しいリセット要求を発行する")
-    func repeatedResetsIssueNewResetRequests() {
+    @Test("空にすると追加の目標量も0へ戻る")
+    func resetClearsAdditionTarget() {
         // 準備
         let controls = FluidControls()
-        controls.reset()
-        let previousReset = controls.resetID
+        controls.show(fraction: 0.4)
+        controls.pour(to: 0.6)
 
         // 実行
         controls.reset()
 
         // 検証
-        #expect(controls.resetID == previousReset + 1)
+        #expect(controls.targetFraction == 0)
+        #expect(controls.insertedFraction == 0)
     }
 }
 

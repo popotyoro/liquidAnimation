@@ -29,28 +29,24 @@ struct FluidControlBar: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+            HStack(spacing: 16) {
+                Button("25%を表示", systemImage: "drop") { controls.show(fraction: 0.25) }
+                Button("10%追加", systemImage: "plus") { controls.pour(to: controls.targetFraction + 0.1) }
+                    .disabled(controls.targetFraction >= 1)
+            }
+            .buttonStyle(.bordered)
             Divider()
             FluidMetricsView(controls: controls)
         }
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .sensoryFeedback(
-            .impact(weight: .light, intensity: 0.35),
-            trigger: controls.restartID
-        ) { _, _ in
-            controls.isHapticFeedbackEnabled
-        }
-        .sensoryFeedback(
-            .impact(weight: .light, intensity: 0.35),
-            trigger: controls.firstContactHapticID
-        ) { _, _ in
-            controls.isHapticFeedbackEnabled
-        }
-        .sensoryFeedback(
-            .success,
-            trigger: controls.pourCompletionHapticID
-        ) { _, _ in
-            controls.isHapticFeedbackEnabled
+        .sensoryFeedback(trigger: controls.feedback) { _, feedback in
+            guard controls.isHapticFeedbackEnabled else { return nil }
+            switch feedback {
+            case .started, .firstContact: return .impact(weight: .light, intensity: 0.35)
+            case .completed: return .success
+            case nil: return nil
+            }
         }
     }
 }

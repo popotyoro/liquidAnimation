@@ -8,6 +8,23 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct WaterRenderingTests {
+    @Test("25%の水を残して40%まで追加注水する様子を描画する",
+          arguments: [0, 8, 30, 60, 120, 360], [FluidKind.water, .beer])
+    func additionalPourRendersFromExistingLevel(frame: Int, kind: FluidKind) throws {
+        // 準備
+        let scene = try OffscreenWater(fill: 0.4, kind: kind, initialFraction: 0.25)
+        scene.advance(frames: frame)
+
+        // 実行
+        let image = try scene.render()
+
+        // 検証
+        #expect(image.alpha(x: image.width / 2, y: image.height * 7 / 8) > 0)
+        #expect(scene.fluid.model.fraction >= 0.25)
+        #expect(scene.fluid.model.fraction <= 0.4 + 1e-10)
+        try image.attach(frame: frame, prefix: "addition-\(kind.rawValue)")
+    }
+
     @Test("着水中と注水後の各時点で液体を描画する", arguments: [60, 90, 120, 150, 180, 210, 240, 480])
     func impactSurfaceRendersAtRequestedTime(frame: Int) throws {
         // 準備
@@ -338,7 +355,7 @@ private final class OffscreenWater {
     private let width = 400
     private let height = 864
 
-    init(fill: Double = 0.5, kind: FluidKind = .water) throws {
+    init(fill: Double = 0.5, kind: FluidKind = .water, initialFraction: Double = 0) throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let library = try #require(device.makeDefaultLibrary())
         queue = try #require(device.makeCommandQueue())
@@ -348,7 +365,7 @@ private final class OffscreenWater {
         configuration.fill = fill
         configuration.kind = kind
         configuration.flow = 0.16
-        fluid.model.reset(configuration: configuration, start: true)
+        fluid.model.reset(configuration: configuration, start: true, initialFraction: initialFraction)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
             width: width, height: height, mipmapped: false)
         descriptor.storageMode = .shared

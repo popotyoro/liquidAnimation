@@ -13,10 +13,6 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     private var pending = false
     private var playback = FluidPlayback()
     private var frameRate = FrameRateMeter(startedAt: CACurrentMediaTime())
-    private var observedHapticRestartID = 0
-    private var observedHapticResetID = 0
-    private var reportedFirstContact = false
-    private var reportedPourCompletion = false
 
     init(controls: FluidControls) { self.controls = controls }
 
@@ -48,26 +44,8 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
               let command = queue.makeCommandBuffer() else { return }
         do {
             let simulation = try prepareSimulation(device: device, size: view.drawableSize)
-            let startedPour = controls.restartID != observedHapticRestartID
-            let resetRequested = controls.resetID != observedHapticResetID
-            if startedPour || resetRequested {
-                observedHapticRestartID = controls.restartID
-                observedHapticResetID = controls.resetID
-                reportedFirstContact = false
-                reportedPourCompletion = false
-            }
-            let wasPouring = simulation.model.isPouring
             let simulationStart = CACurrentMediaTime()
             playback.advance(simulation.model, controls: controls, now: simulationStart)
-            if simulation.model.hasMadeFirstContact && !reportedFirstContact {
-                controls.reportFirstContact()
-                reportedFirstContact = true
-            }
-            if !startedPour, !resetRequested, wasPouring, !simulation.model.isPouring,
-               !reportedPourCompletion {
-                controls.reportPourCompletion()
-                reportedPourCompletion = true
-            }
             // 停止中も転送・描画して、不透明度などの表示設定を反映する。
             simulation.uploadSurface()
             let simulationMS = (CACurrentMediaTime() - simulationStart) * 1_000
@@ -110,7 +88,7 @@ final class LiquidRenderer: NSObject, MTKViewDelegate {
     private func submit(_ command: any MTLCommandBuffer, model: WaterModel, simulationMilliseconds: Double) {
         pending = true
         let fraction = model.fraction
-        let pouring = model.isPouring
+        let pouring = model.isPouring || playback.hasPendingPour(model, controls: controls)
         command.addCompletedHandler { @Sendable [weak self] completed in
             // MainActor外では値だけを取り出し、コマンドやモデルをUIタスクへ渡さない。
             let gpuMS = max(0, completed.gpuEndTime - completed.gpuStartTime) * 1_000

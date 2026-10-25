@@ -35,14 +35,14 @@ struct FluidSettingsView: View {
                 } header: {
                     Text("注ぎ方")
                 } footer: {
-                    Text("目標量と注ぎ方は次に「注ぐ」を押すと反映し、空の状態から開始します。角度は下向きが 0°、正の値で右向きです。")
+                    Text("「注ぐ」は現在の設定で空から開始します。「10%追加」は現在の液体と注ぎ方を保って追加します。角度は下向きが 0°、正の値で右向きです。")
                 }
                 Section {
-                    Toggle("注水開始時に振動する", isOn: $controls.isHapticFeedbackEnabled)
+                    Toggle("注水に合わせて振動する", isOn: $controls.isHapticFeedbackEnabled)
                 } header: {
                     Text("触覚フィードバック")
                 } footer: {
-                    Text("注水を開始したときに軽い触覚を一度返します。")
+                    Text("注水開始・初回着水・目標到達時に触覚を返します。")
                 }
 
             }

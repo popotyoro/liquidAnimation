@@ -4,12 +4,20 @@ import Observation
 /// アプリ既定のMainActor隔離を利用し、毎フレームの水面配列はここへ載せない。
 @Observable
 final class FluidControls {
+    enum Request {
+        case show
+        case pour(from: Double?)
+    }
+
+    nonisolated enum Feedback: Equatable, Sendable {
+        case started, firstContact, completed
+    }
+
     var configuration = FluidConfiguration()
-    // IDの変化を描画ループが検出する。同じ操作の繰り返しも通知できる。
-    private(set) var restartID = 0
-    private(set) var resetID = 0
-    private(set) var firstContactHapticID = 0
-    private(set) var pourCompletionHapticID = 0
+    @ObservationIgnored private var pendingRequest: Request?
+    /// 最後に要求された合計割合。設定画面のfillは、次に空から注ぐときの指定値。
+    private(set) var targetFraction = 0.0
+    private(set) var feedback: Feedback?
     var isPaused = false
     var isHapticFeedbackEnabled = true
     var status = "注水して動きを確認"
@@ -19,23 +27,56 @@ final class FluidControls {
     var gpuMilliseconds = 0.0
     var simulationMilliseconds = 0.0
 
+    init(initialFraction: Double = 0) {
+        if initialFraction != 0 { show(fraction: initialFraction) }
+    }
+
     /// 空の状態から、現在の設定で注水し直す要求を発行する。
     func pour() {
         isPaused = false
-        restartID += 1
+        targetFraction = configuration.sanitized.fill
+        pendingRequest = .pour(from: 0)
+        feedback = nil
+    }
+
+    /// 現在量を残し、指定した合計割合まで追加する。減量はshow(fraction:)で反映する。
+    func pour(to fraction: Double) {
+        guard fraction.isFinite else { return }
+        let target = min(1, max(0, fraction))
+        guard target > targetFraction else { return }
+        let initial: Double?
+        switch pendingRequest {
+        case .show: initial = targetFraction
+        case .pour(let from): initial = from
+        case nil: initial = nil
+        }
+        targetFraction = target
+        isPaused = false
+        pendingRequest = .pour(from: initial)
+        feedback = nil
+    }
+
+    /// 記録済みの割合を注水せずに表示し、進行中の注水要求を取り消す。
+    func show(fraction: Double) {
+        let fraction = fraction.isFinite ? min(1, max(0, fraction)) : 0
+        targetFraction = fraction
+        insertedFraction = fraction
+        isPaused = false
+        pendingRequest = .show
+        feedback = nil
+        status = fraction > 0 ? "記録済みの量を表示" : "注水して動きを確認"
     }
 
     /// 水面・水流・飛沫を消す要求を発行し、表示上の投入量も戻す。
     func reset() {
-        isPaused = false
-        resetID += 1
-        insertedFraction = 0
-        status = "注水して動きを確認"
+        show(fraction: 0)
     }
 
-    /// 初回着水をUIへ通知する。
-    func reportFirstContact() { firstContactHapticID += 1 }
+    /// 描画側が一度だけ受け取り、未処理の要求を消費する。
+    func takeRequest() -> Request? {
+        defer { pendingRequest = nil }
+        return pendingRequest
+    }
 
-    /// 注水目標への到達をUIへ通知する。
-    func reportPourCompletion() { pourCompletionHapticID += 1 }
+    func reportFeedback(_ feedback: Feedback) { self.feedback = feedback }
 }

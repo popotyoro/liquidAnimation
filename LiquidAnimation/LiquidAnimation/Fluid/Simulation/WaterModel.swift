@@ -5,7 +5,8 @@ import simd
 /// 長さはm、断面積はm²、momentumは水深×水平速度（m²/s）。
 /// 水面の巻き返りや内部の渦は解かず、着水圧力と飛沫を近似的に加える。
 final class WaterModel {
-    let columnCount: Int
+    static let minimumPourArea = 1e-12
+    var columnCount: Int { depths.count }
     let width = 0.75
     let height: Double
     // 各列の水深と流量。列境界のフラックスで隣の列へ水・運動量を移す。
@@ -15,6 +16,7 @@ final class WaterModel {
     private var momentumFlux: [Double]
     private(set) var impactPressure: [Double] // 圧力÷密度（m²/s²）。着水点のへこみを作る。
     private var impactImpulse: [Double]
+    /// この注水で確定した設定。fillが実行中の目標割合の正となる。
     private(set) var configuration = FluidConfiguration()
     // 投入総量 = 水面内の量 + 水流の量 + 飛沫の量。空中分も目標量に含める。
     private(set) var emittedArea = 0.0
@@ -34,7 +36,9 @@ final class WaterModel {
 
     private var drops: [Drop] = []
     private var attemptedTailSeparation = false
-    private var separatedTailStart: Double?
+    private var separatedTailStart: Double? {
+        separatedTailArea > 0 ? pourEndTime - rampDuration * 0.4 : nil
+    }
     private(set) var separatedTailArea = 0.0
     var detachedDropCount: Int { drops.filter(\.detachedFromStream).count }
     private var lastSplashTime = -1.0
@@ -50,7 +54,7 @@ final class WaterModel {
     private var bubbleSequence = 0
     private var lastCarbonationTime = -1.0
     private var carbonationSequence = 0
-    private var material = FluidMaterial()
+    private var material: FluidMaterial { configuration.kind.material }
     var bubbleCount: Int { bubbles.count }
     var visualDetails: SIMD4<Float> {
         let sum = impactPressure.reduce(0, +)
@@ -60,26 +64,31 @@ final class WaterModel {
         return SIMD4(Float(center), Float((impactPressure.max() ?? 0) / (gravity * 0.06)),
                      Float(time), Float(height / width))
     }
-    private var targetArea = 0.0
+    private var targetArea: Double { configuration.fill * capacity }
+    private var emissionStartArea = 0.0
+    private var emissionStartedAt = 0.0
     private let gravity = 9.81
     private var inletSpeed: Double { material.inletSpeed }
     private let dryDepth = 1e-7
 
     private var nominalRate: Double { configuration.flow * capacity }
-    private var emission: PourEmission { PourEmission(targetArea: targetArea, nominalRate: nominalRate) }
+    private var emission: PourEmission { PourEmission(targetArea: targetArea - emissionStartArea, nominalRate: nominalRate) }
     private var rampDuration: Double { emission.rampDuration }
     var pourDuration: Double { emission.duration }
-    var inletRate: Double { emission.rate(at: time) }
+    private var pourEndTime: Double { emissionStartedAt + pourDuration }
+    var inletRate: Double { emissionRate(at: time) }
 
-    private func emissionRate(at instant: Double) -> Double { emission.rate(at: instant) }
-    private func cumulativeEmission(at instant: Double) -> Double { emission.cumulativeArea(at: instant) }
+    private func emissionRate(at instant: Double) -> Double { emission.rate(at: instant - emissionStartedAt) }
+    private func cumulativeEmission(at instant: Double) -> Double {
+        emissionStartArea + emission.cumulativeArea(at: instant - emissionStartedAt)
+    }
 
     var capacity: Double { width * height }
     var fraction: Double { emittedArea / capacity }
     var landedFraction: Double { landedArea / capacity }
     /// 水流と飛沫の合計。飛沫への振り分けでは投入総量を変えない。
     var airborneFraction: Double { max(0, emittedArea - landedArea) / capacity }
-    var isPouring: Bool { emittedArea < targetArea - 1e-12 }
+    var isPouring: Bool { emittedArea < targetArea - Self.minimumPourArea }
     var hasWater: Bool { emittedArea > 0 }
     var meanDepth: Double { depths.reduce(0, +) / Double(columnCount) }
     var surfaceRange: Double { (depths.max() ?? 0) - (depths.min() ?? 0) }
@@ -91,35 +100,36 @@ final class WaterModel {
     }
     private var dx: Double { width / Double(columnCount) }
     private var angle: Double { configuration.angle * .pi / 180 }
-    private var inletVelocity = SIMD2(0.0, 1.6)
+    private var inletVelocity: SIMD2<Double> { SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle)) }
 
     /// 幅0.75mを基準に、表示領域の縦横比から容器の高さを決める。
     init(aspectRatio: Double, columnCount: Int = 128) {
-        self.columnCount = max(16, columnCount)
+        let columnCount = max(16, columnCount)
         height = width * min(4, max(0.5, aspectRatio))
-        depths = .init(repeating: 0, count: self.columnCount)
+        depths = .init(repeating: 0, count: columnCount)
         momentum = depths
-        heightFlux = .init(repeating: 0, count: self.columnCount + 1)
+        heightFlux = .init(repeating: 0, count: columnCount + 1)
         momentumFlux = heightFlux
         impactPressure = depths
         impactImpulse = depths
+        configuration.fill = 0
     }
 
     /// 設定を確定し、空中の水・水面・圧力・時刻をまとめて初期化する。
-    func reset(configuration: FluidConfiguration, start: Bool) {
+    func reset(configuration: FluidConfiguration, start: Bool, initialFraction: Double = 0) {
         self.configuration = configuration.sanitized
-        material = self.configuration.kind.material
-        inletVelocity = SIMD2(inletSpeed * sin(angle), inletSpeed * cos(angle))
-        targetArea = start ? self.configuration.fill * capacity : 0
-        emittedArea = 0
-        landedArea = 0
+        let initial = initialFraction.isFinite ? min(1, max(0, initialFraction)) : 0
+        emittedArea = initial * capacity
+        landedArea = emittedArea
+        emissionStartArea = emittedArea
+        emissionStartedAt = 0
+        self.configuration.fill = start ? max(initial, self.configuration.fill) : initial
         hasMadeFirstContact = false
         time = 0
         foam = BeerFoam()
         parcels.removeAll(keepingCapacity: true)
         drops.removeAll(keepingCapacity: true)
         attemptedTailSeparation = false
-        separatedTailStart = nil
         separatedTailArea = 0
         lastSplashTime = -1
         splashSequence = 0
@@ -129,11 +139,26 @@ final class WaterModel {
         lastCarbonationTime = -1
         carbonationSequence = 0
         for i in depths.indices {
-            depths[i] = 0
+            depths[i] = initial * height
             momentum[i] = 0
             impactPressure[i] = 0
             impactImpulse[i] = 0
         }
+    }
+
+    /// 前の水流が着水した後に、波・飛沫・気泡と物理時刻を保って次の差分を注ぐ。
+    @discardableResult
+    func pour(to fraction: Double) -> Bool {
+        guard fraction.isFinite, !isPouring, parcels.isEmpty else { return false }
+        let target = min(1, max(0, fraction))
+        guard target * capacity > emittedArea + Self.minimumPourArea else { return false }
+        emissionStartArea = emittedArea
+        emissionStartedAt = time
+        configuration.fill = target
+        hasMadeFirstContact = false
+        attemptedTailSeparation = false
+        separatedTailArea = 0
+        return true
     }
 
     /// CFL条件に従う小刻みな更新で数値計算を安定させる。遅延分の大量計算はしない。
@@ -180,7 +205,7 @@ final class WaterModel {
         let amount = min(max(0, cumulativeEmission(at: time) - emittedArea), targetArea - emittedArea)
         emittedArea += amount
         // 各区間の代表時刻は時間刻みの中央に置く。
-        if amount > 0 { parcels.append(Parcel(time: min(time - dt / 2, pourDuration), area: amount)) }
+        if amount > 0 { parcels.append(Parcel(time: min(time - dt / 2, pourEndTime), area: amount)) }
     }
 
     /// 初速と重力から水流の中心軌道を求める。壁ではxを固定して下へ流す。
@@ -272,15 +297,15 @@ final class WaterModel {
     /// 表面張力による分裂は解かず、減流区間の最後の40%を対象とする。
     private func detachThinTail() {
         guard material.separatesTail, !attemptedTailSeparation, targetArea > 0, !isPouring,
-              time >= pourDuration + 0.05 else { return }
+              time >= pourEndTime + 0.05 else { return }
         attemptedTailSeparation = true
-        let cutTime = pourDuration - rampDuration * 0.4
+        let cutTime = pourEndTime - rampDuration * 0.4
         let tail = parcels.filter { $0.time >= cutTime }
         guard tail.count >= 3, drops.count + 3 <= Self.maximumDrops else { return }
         var areas = [Double](repeating: 0, count: 3)
         var moments = areas
         for parcel in tail {
-            let group = min(2, max(0, Int((parcel.time - cutTime) / (pourDuration - cutTime) * 3)))
+            let group = min(2, max(0, Int((parcel.time - cutTime) / (pourEndTime - cutTime) * 3)))
             areas[group] += parcel.area
             moments[group] += parcel.time * parcel.area
         }
@@ -294,7 +319,6 @@ final class WaterModel {
         }
         // 水流から除いた面積をそのまま水滴へ移す。投入量・着水済み量は変えない。
         separatedTailArea = areas.reduce(0, +)
-        separatedTailStart = cutTime
         parcels.removeAll { $0.time >= cutTime }
     }
 
@@ -526,7 +550,7 @@ final class WaterModel {
     private func streamProfile(first: Parcel) -> StreamProfile {
         // 角度が大きい場合も入口の切断面が画面内に見えないよう、上流を画面外へ延ばす。
         let inletExtension = -(nominalRate / inletSpeed + 0.02) / inletVelocity.y
-        let youngest = isPouring ? inletExtension : max(0, time - (separatedTailStart ?? pourDuration))
+        let youngest = isPouring ? inletExtension : max(0, time - (separatedTailStart ?? pourEndTime))
         var oldest = time - first.time
         // 最古の未着水区間は水面の手前にある。近接時だけ描画上の先端を補間し、隙間を抑える。
         let head = flightPosition(age: oldest)
@@ -543,14 +567,14 @@ final class WaterModel {
         // 開始時の薄い水を先端の小さなふくらみとして描き、長い針状の輪郭を避ける。
         // 初期に投入した量から大きさを決めるが、これは表面張力を解かない描画上の近似。
         // 最初の水が着水した後は適用せず、既存の着水点の描画へ引き継ぐ。
-        let freeHead = landedArea == 0 && !nearSurface
+        let freeHead = !hasMadeFirstContact && !nearSurface
         let headSpeed = simd_length(SIMD2(inletVelocity.x, inletVelocity.y + gravity * oldest))
-        let initialArea = cumulativeEmission(at: min(time * 0.5, rampDuration * 0.5))
+        let initialArea = emission.cumulativeArea(at: min((time - emissionStartedAt) * 0.5, rampDuration * 0.5))
         let headRadius = freeHead ? min(0.02, sqrt(initialArea / .pi)) : 0
         let headDuration = min(max(0, oldest - max(0, youngest)), 2 * headRadius / headSpeed)
         // 水滴に移した領域を帯でつなぎ直さず、残った帯の末尾を丸く閉じる。
         let tailSpeed = simd_length(SIMD2(inletVelocity.x, inletVelocity.y + gravity * max(0, youngest)))
-        let tailRadius = emissionRate(at: separatedTailStart ?? pourDuration) / (2 * tailSpeed)
+        let tailRadius = emissionRate(at: separatedTailStart ?? pourEndTime) / (2 * tailSpeed)
         let tailDuration = min(max(0, oldest - youngest), tailRadius / tailSpeed)
         return StreamProfile(youngest: youngest, oldest: oldest, headRadius: headRadius,
                              headDuration: headDuration, tailDuration: tailDuration)
@@ -563,7 +587,7 @@ final class WaterModel {
         // 開始・終了の細い区間だけサンプルを増やし、長い帯全体の分割数は抑える。
         for i in 0..<12 {
             let offset = rampDuration * Double(i) / 12
-            for emittedAt in [offset, pourDuration - offset] {
+            for emittedAt in [emissionStartedAt + offset, pourEndTime - offset] {
                 let age = time - emittedAt
                 if age > youngest && age < oldest { ages.append(age) }
             }
@@ -612,7 +636,7 @@ final class WaterModel {
         if headDuration > 0 {
             // 丸みだけを先端に足すと「針の先の玉」に見えるため、初期の細い部分もつなぐ。
             // 増流区間の後半で補正を滑らかに0へ戻し、通常の流量に基づく幅へ接続する。
-            let emittedAt = min(time, time - age)
+            let emittedAt = min(time, time - age) - emissionStartedAt
             let blend = min(1, max(0, (emittedAt - rampDuration / 2) / (rampDuration / 2)))
             let neck = 1 - blend * blend * (3 - 2 * blend)
             halfWidth = max(halfWidth, headRadius * neck)
