@@ -2,6 +2,14 @@
 
 SwiftUIの画面に液体を重ねるiOS向けライブラリ。Metalによる注水と、日付セルなどに使える軽量な水位アニメーションを提供する。
 
+## 構成
+
+```text
+LiquidFluid/       Swift Package（Package.swift・Sources・Tests）
+LiquidAnimation/   パッケージを利用するデモアプリ
+docs/              仕様・開発方針
+```
+
 ## 動作条件
 
 - iOS 27.0以降
@@ -12,9 +20,9 @@ Swift 6モードの完全な並行性チェックを使う。ライブラリの�
 
 ## パッケージの利用
 
-Xcodeの「Add Local Package」でこのリポジトリのルートを選び、アプリのターゲットに`LiquidFluid`をリンクする。別のSwift Packageからは`.package(path: "../liquidAnimation")`を依存関係に追加し、対象ターゲットで`.product(name: "LiquidFluid", package: "liquidAnimation")`を指定する。
+Xcodeの「Add Local Package」でこのリポジトリの`LiquidFluid/`を選び、アプリのターゲットに`LiquidFluid`をリンクする。別のSwift Packageからは`.package(path: "../liquidAnimation/LiquidFluid")`を依存関係に追加し、対象ターゲットで`.product(name: "LiquidFluid", package: "LiquidFluid")`を指定する。
 
-デモは`LiquidAnimation/LiquidAnimation.xcodeproj`を開く。`LiquidAnimation`スキームはルートのパッケージを相対パスで参照する。Metalシェーダーはパッケージに同梱され、利用側でコピーする必要はない。
+デモは`LiquidAnimation/LiquidAnimation.xcodeproj`を開く。`LiquidAnimation`スキームは隣の`LiquidFluid/`を相対パスで参照する。Metalシェーダーはパッケージに同梱され、利用側でコピーする必要はない。
 
 ## 注水する
 
@@ -56,6 +64,6 @@ Text("今日の達成率")
 
 ## テスト
 
-ライブラリのテストは、リポジトリのルートをXcodeでパッケージとして開き、`LiquidFluid`スキームで実行する。デモのテストはXcodeプロジェクトの`LiquidAnimationTests`スキームを使う。実行先はiPhone 18 Proシミュレータ。
+ライブラリのテストは、`LiquidFluid/`をXcodeでパッケージとして開き、`LiquidFluid`スキームで実行する。デモのテストはXcodeプロジェクトの`LiquidAnimationTests`スキームを使う。実行先はiPhone 18 Proシミュレータ。
 
 仕様は[液体注入アニメーション仕様書](docs/liquid-animation-spec.md)、テスト方針は[テストの設計と実行](docs/testing-guide.md)、残作業は[配布までの残作業](docs/future-features.md)を参照。

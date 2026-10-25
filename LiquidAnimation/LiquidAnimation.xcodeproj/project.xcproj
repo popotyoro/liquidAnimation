@@ -11,7 +11,7 @@
     ],
   },
   "files": [
-    { "path": "../Tests/LiquidFluidTests/RenderedTestImage.swift", "target-membership": ["LiquidAnimationTests/compile-sources"] },
+    { "path": "../LiquidFluid/Tests/LiquidFluidTests/RenderedTestImage.swift", "target-membership": ["LiquidAnimationTests/compile-sources"] },
     { "kind": "folder", "path": "LiquidAnimation", "target-membership": [ "LiquidAnimation" ] },
     { "kind": "folder", "path": "LiquidAnimationTests", "target-membership": [ "LiquidAnimationTests" ] },
     {
@@ -30,7 +30,7 @@
       ],
     },
   ],
-  "packages": [{ "kind": "local", "path": ".." }],
+  "packages": [{ "kind": "local", "path": "../LiquidFluid" }],
   "targets": [
     {
       "name": "LiquidAnimation",

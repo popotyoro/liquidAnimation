@@ -225,7 +225,7 @@ Metalでは透明な中心、明暗のある縁、小さな反射光を描く。
 
 物理計算はSwiftでCPU上に実装し、MetalはGPU上で描画を行う。表示水面の事前計算にはMetalの計算シェーダーを使う。
 
-`Sources/LiquidFluid/`内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`Model/`、計算と再生制御を`Simulation/`、GPUへの転送と描画を`Rendering/`に分ける。`WaterModel`は水深などの更新を実行するため`Simulation/`に置く。下表のライブラリ内のパスは、このディレクトリを基準とする。デモ専用UIとカレンダーはアプリ側の`Demo/`に置く。
+`LiquidFluid/Sources/LiquidFluid/`内は、SwiftUIとの接続を`View/`、設定と状態のデータ型を`Model/`、計算と再生制御を`Simulation/`、GPUへの転送と描画を`Rendering/`に分ける。`WaterModel`は水深などの更新を実行するため`Simulation/`に置く。下表のライブラリ内のパスは、このディレクトリを基準とする。デモ専用UIとカレンダーはアプリ側の`Demo/`に置く。
 
 | 担当箇所 | 責務 |
 | --- | --- |
