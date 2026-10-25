@@ -14,12 +14,14 @@ let package = Package(
     targets: [
         .target(
             name: "LiquidFluid",
+            path: "LiquidFluid/Sources/LiquidFluid",
             resources: [.process("Rendering/Fluid.metal")],
             swiftSettings: concurrencySettings + [.defaultIsolation(MainActor.self)]
         ),
         .testTarget(
             name: "LiquidFluidTests",
             dependencies: ["LiquidFluid"],
+            path: "LiquidFluid/Tests/LiquidFluidTests",
             swiftSettings: concurrencySettings + [.defaultIsolation(nil)]
         ),
     ],

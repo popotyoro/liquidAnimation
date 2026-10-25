@@ -30,7 +30,7 @@
       ],
     },
   ],
-  "packages": [{ "kind": "local", "path": "../LiquidFluid" }],
+  "packages": [{ "kind": "local", "path": ".." }],
   "targets": [
     {
       "name": "LiquidAnimation",

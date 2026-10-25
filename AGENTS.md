@@ -4,10 +4,11 @@
 
 SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iOS アプリ。長方形の容器、2D の流体計算、設定可能な液量と不透明度、60fps を目標とする。要件と数式は `docs/liquid-animation-spec.md` を参照し、仕様を変更した場合は同時に更新する。
 
-- `LiquidFluid/Package.swift`：Swift tools 6.4によるライブラリとテストの定義。
+- `Package.swift`：Swift tools 6.4によるライブラリとテストの定義。デモアプリはターゲットに含めない。
 - `LiquidFluid/Tests/LiquidFluidTests/`：ライブラリのテスト。
 - `LiquidAnimation/LiquidAnimation/Demo/`：デモ専用の画面・設定UI・カレンダー。
 - `LiquidAnimation/LiquidAnimation.xcodeproj`：Xcode プロジェクト。
+- `LiquidAnimation/Package.swift`：Xcodeのルートパッケージ表示からデモを除外するための空の定義。
 - `LiquidAnimation/LiquidAnimation/ContentView.swift`：サンプル画面と設定 UI。
 - `LiquidFluid/Sources/LiquidFluid/View/`：SwiftUIの入口、modifier、`MTKView`の組み込み。
 - `LiquidFluid/Sources/LiquidFluid/Model/`：設定・操作状態、水滴・気泡などのデータ型。
@@ -28,7 +29,7 @@ Metalの処理・起動方式を変更した場合は、描画テストに加え
 
 設定の確認・変更には `GetTargetBuildSettings` と `UpdateTargetBuildSetting` を使う。`project.pbxproj` を直接編集しない。Metal ツールチェーンなどの環境不足は報告し、無断で別のビルド方式へ切り替えない。
 
-変更後は、先に `LiquidAnimation` スキームで `BuildProject` を実行してパッケージとのリンクを確認する。ライブラリのテストは`LiquidFluid/`を `XcodeOpenWorkspace` で開き、`LiquidFluid` スキームを使う。デモのテストはプロジェクト側の `LiquidAnimationTests` スキームで実行する。
+変更後は、先に `LiquidAnimation` スキームで `BuildProject` を実行してパッケージとのリンクを確認する。ライブラリのテストはリポジトリのルートを `XcodeOpenWorkspace` で開き、`LiquidFluid` スキームを使う。デモのテストはプロジェクト側の `LiquidAnimationTests` スキームで実行する。
 
 ## コードの書き方
 

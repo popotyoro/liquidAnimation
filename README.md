@@ -5,7 +5,8 @@ SwiftUIの画面に液体を重ねるiOS向けライブラリ。Metalによる�
 ## 構成
 
 ```text
-LiquidFluid/       Swift Package（Package.swift・Sources・Tests）
+Package.swift      Swift Packageの定義
+LiquidFluid/       ライブラリのSources・Tests
 LiquidAnimation/   パッケージを利用するデモアプリ
 docs/              仕様・開発方針
 ```
@@ -20,9 +21,11 @@ Swift 6モードの完全な並行性チェックを使う。ライブラリの�
 
 ## パッケージの利用
 
-Xcodeの「Add Local Package」でこのリポジトリの`LiquidFluid/`を選び、アプリのターゲットに`LiquidFluid`をリンクする。別のSwift Packageからは`.package(path: "../liquidAnimation/LiquidFluid")`を依存関係に追加し、対象ターゲットで`.product(name: "LiquidFluid", package: "LiquidFluid")`を指定する。
+Xcodeの「Add Package Dependencies」でGitHubのリポジトリURLを指定し、アプリのターゲットに`LiquidFluid`をリンクする。ローカルで使う場合は「Add Local Package」でこのリポジトリのルートを選ぶ。別のSwift Packageからローカル参照する場合は`.package(path: "../liquidAnimation")`を依存関係に追加し、対象ターゲットで`.product(name: "LiquidFluid", package: "liquidAnimation")`を指定する。
 
-デモは`LiquidAnimation/LiquidAnimation.xcodeproj`を開く。`LiquidAnimation`スキームは隣の`LiquidFluid/`を相対パスで参照する。Metalシェーダーはパッケージに同梱され、利用側でコピーする必要はない。
+デモは`LiquidAnimation/LiquidAnimation.xcodeproj`を開く。`LiquidAnimation`スキームはリポジトリのルートを相対パスで参照する。デモアプリはSwift Packageのターゲットに含めない。Metalシェーダーはパッケージに同梱され、利用側でコピーする必要はない。
+
+`LiquidAnimation/Package.swift`は、Xcodeのルートパッケージ表示からデモを除外するための空の定義。表示が残っている場合はXcodeプロジェクトを開き直す。
 
 ## 注水する
 
@@ -64,6 +67,6 @@ Text("今日の達成率")
 
 ## テスト
 
-ライブラリのテストは、`LiquidFluid/`をXcodeでパッケージとして開き、`LiquidFluid`スキームで実行する。デモのテストはXcodeプロジェクトの`LiquidAnimationTests`スキームを使う。実行先はiPhone 18 Proシミュレータ。
+ライブラリのテストは、リポジトリのルートをXcodeでパッケージとして開き、`LiquidFluid`スキームで実行する。デモのテストはXcodeプロジェクトの`LiquidAnimationTests`スキームを使う。実行先はiPhone 18 Proシミュレータ。
 
 仕様は[液体注入アニメーション仕様書](docs/liquid-animation-spec.md)、テスト方針は[テストの設計と実行](docs/testing-guide.md)、残作業は[配布までの残作業](docs/future-features.md)を参照。
