@@ -5,12 +5,13 @@
 SwiftUI の画面に液体を重ね、上端の一か所から斜めに注ぐ iOS アプリ。長方形の容器、2D の流体計算、設定可能な液量と不透明度、60fps を目標とする。要件と数式は `docs/liquid-animation-spec.md` を参照し、仕様を変更した場合は同時に更新する。
 
 - `LiquidAnimation/LiquidAnimation.xcodeproj`：Xcode プロジェクト。
-- `LiquidAnimation/LiquidAnimation/ContentView.swift`：試作画面と設定 UI。
+- `LiquidAnimation/LiquidAnimation/ContentView.swift`：サンプル画面と設定 UI。
 - `LiquidAnimation/LiquidAnimation/Fluid/View/`：SwiftUIの入口、modifier、`MTKView`の組み込み。
 - `LiquidAnimation/LiquidAnimation/Fluid/Model/`：設定・操作状態、水滴・気泡などのデータ型。
 - `LiquidAnimation/LiquidAnimation/Fluid/Simulation/`：浅水モデル、注水曲線、数式、再生制御。
 - `LiquidAnimation/LiquidAnimation/Fluid/Rendering/`：Metal描画、共有バッファ、頂点・定数、描画エラー。
-- `LiquidAnimation/LiquidAnimation/Assets.xcassets`：色とアプリアイコン。
+- `LiquidAnimation/LiquidAnimation/Assets.xcassets`：色。
+- `LiquidAnimation/LiquidAnimation/AppIcon.icon`：Icon Composerのアプリアイコン。
 
 ## ビルド・実行は Xcode MCP を使う
 
@@ -47,7 +48,7 @@ SwiftUI は設定と操作、CPU は浅水モデルと液量の計算、Metal �
 
 液量は水流・飛沫を含めた投入総量で管理する。透明なレイヤーは背景の描画内容に依存せず、タッチを遮らない。時間刻み、境界条件、数値的な減衰などの近似はコードと仕様書に残す。
 
-現在は試行錯誤の段階のため、実装と見た目の調整を優先し、テストコードの追加・更新と実行はコミット前にまとめて行う。各調整のたびにテストの作成・実行を必須としない。ビルド・起動確認は調整中も必要に応じて行う。
+実装と見た目の調整を優先し、テストコードの追加・更新と実行はコミット前にまとめて行う。各調整のたびにテストの作成・実行を必須としない。ビルド・起動確認は調整中も必要に応じて行う。
 
 ただし、描画変更時はコミット前まで待たず、描画テストで時間ごとの画像を出力して実際に目視確認する。ビルド・起動の成功だけで見た目を確認済みとしない。振る舞いのテスト整備と全件実行はコミット前にまとめてよい。
 
@@ -64,7 +65,7 @@ Swift Testing の `LiquidAnimationTests` ターゲットを使用する。カバ
 
 ## コミットとプルリクエスト
 
-既存のコミットは `Add SwiftUI liquid simulation prototype` のような短い命令形。新しいコミットも変更目的が分かる表現にする。PR には目的、変更内容、MCP での確認結果、未検証事項を記載する。見た目の変更には画像または動画を添え、関連 Issue があればリンクする。
+コミットメッセージは変更目的が分かる短い命令形にする。PR には目的、変更内容、MCP での確認結果、未検証事項を記載する。見た目の変更には画像または動画を添え、関連 Issue があればリンクする。
 
 ## エージェントの作業範囲
 
