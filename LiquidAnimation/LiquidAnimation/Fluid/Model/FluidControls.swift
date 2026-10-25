@@ -8,7 +8,10 @@ final class FluidControls {
     // IDの変化を描画ループが検出する。同じ操作の繰り返しも通知できる。
     private(set) var restartID = 0
     private(set) var resetID = 0
+    private(set) var firstContactHapticID = 0
+    private(set) var pourCompletionHapticID = 0
     var isPaused = false
+    var isHapticFeedbackEnabled = true
     var status = "注水して動きを確認"
     var error: String?
     var insertedFraction = 0.0
@@ -29,4 +32,10 @@ final class FluidControls {
         insertedFraction = 0
         status = "注水して動きを確認"
     }
+
+    /// 初回着水をUIへ通知する。
+    func reportFirstContact() { firstContactHapticID += 1 }
+
+    /// 注水目標への到達をUIへ通知する。
+    func reportPourCompletion() { pourCompletionHapticID += 1 }
 }

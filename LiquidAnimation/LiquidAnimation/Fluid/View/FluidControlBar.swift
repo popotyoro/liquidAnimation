@@ -34,5 +34,23 @@ struct FluidControlBar: View {
         }
         .padding()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .sensoryFeedback(
+            .impact(weight: .light, intensity: 0.35),
+            trigger: controls.restartID
+        ) { _, _ in
+            controls.isHapticFeedbackEnabled
+        }
+        .sensoryFeedback(
+            .impact(weight: .light, intensity: 0.35),
+            trigger: controls.firstContactHapticID
+        ) { _, _ in
+            controls.isHapticFeedbackEnabled
+        }
+        .sensoryFeedback(
+            .success,
+            trigger: controls.pourCompletionHapticID
+        ) { _, _ in
+            controls.isHapticFeedbackEnabled
+        }
     }
 }

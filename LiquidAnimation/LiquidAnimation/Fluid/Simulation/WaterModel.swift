@@ -19,6 +19,7 @@ final class WaterModel {
     // 投入総量 = 水面内の量 + 水流の量 + 飛沫の量。空中分も目標量に含める。
     private(set) var emittedArea = 0.0
     private(set) var landedArea = 0.0
+    private(set) var hasMadeFirstContact = false
     private(set) var time = 0.0
     /// 着水済みの量のうち、泡の膜に保持される液体（m²）。landedAreaの内数。
     var foamLiquidArea: Double { foam.liquidArea }
@@ -112,6 +113,7 @@ final class WaterModel {
         targetArea = start ? self.configuration.fill * capacity : 0
         emittedArea = 0
         landedArea = 0
+        hasMadeFirstContact = false
         time = 0
         foam = BeerFoam()
         parcels.removeAll(keepingCapacity: true)
@@ -204,6 +206,7 @@ final class WaterModel {
                 survivors.append(parcel)
                 continue
             }
+            hasMadeFirstContact = true
             let impactSpeed = inletVelocity.y + gravity * age
             if collisionDepths[column] > 0.035, time - lastBubbleTime >= material.entrainmentInterval,
                emissionRate(at: parcel.time) > nominalRate * 0.05 {
