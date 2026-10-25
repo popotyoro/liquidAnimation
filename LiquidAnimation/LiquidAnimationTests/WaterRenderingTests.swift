@@ -252,6 +252,37 @@ struct WaterRenderingTests {
         #expect(scene.fluid.model.fraction == fraction)
     }
 
+    @Test("静止した液体は水面近くより深い部分ほど暗くなる", arguments: FluidColorChoice.allCases)
+    func deeperLiquidHasDarkerColor(color: FluidColorChoice) throws {
+        // 準備
+        let scene = try OffscreenWater()
+        scene.advance(frames: 480)
+
+        // 実行
+        let image = try scene.render(opacity: 1, color: color)
+
+        // 検証。中央列の水面から離れた2点で、反射の縁を除いて比較する。
+        let x = image.width / 2
+        let shallowY = image.height * 5 / 8
+        let deepY = image.height * 7 / 8
+        #expect(image.luminance(x: x, y: deepY) < image.luminance(x: x, y: shallowY))
+        #expect(image.alpha(x: x, y: deepY) == image.alpha(x: x, y: shallowY))
+    }
+
+    @Test("物理状態が同じなら反射と厚みの質感は再描画しても変わらない")
+    func repeatedRenderingKeepsMaterialStill() throws {
+        // 準備
+        let scene = try OffscreenWater()
+        scene.advance(frames: 120)
+        let before = try scene.render()
+
+        // 実行
+        let after = try scene.render()
+
+        // 検証
+        #expect(after.pixels == before.pixels)
+    }
+
     @Test("注水後の炭酸気泡は400px幅で直径4.5px以上になる", arguments: [FluidKind.beer, .sparklingWater])
     func carbonationOutlinesMeetMinimumDiameter(kind: FluidKind) throws {
         // 準備
@@ -371,6 +402,12 @@ private struct RenderedWater {
     }
 
     func alpha(x: Int, y: Int) -> UInt8 { pixels[(y * width + x) * 4 + 3] }
+
+    func luminance(x: Int, y: Int) -> Double {
+        let offset = (y * width + x) * 4
+        return 0.2126 * Double(pixels[offset]) + 0.7152 * Double(pixels[offset + 1])
+            + 0.0722 * Double(pixels[offset + 2])
+    }
 
     func attach(frame: Int, prefix: String = "water") throws {
         let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))

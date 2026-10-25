@@ -130,22 +130,38 @@ float2 sampledSurface(float x, constant WaterUniforms &s, device const float2 *s
     return mix(samples[left], samples[right], fract(coordinate));
 }
 
-// 反射と縁の丸み。水の色や着水模様とは独立した、装飾的なライティング。
-float3 surfaceLighting(float3 color, float x, float depth, float distance, float slope,
-                       constant WaterUniforms &s) {
-    // 左上の広い光源を仮定した装飾的な反射。背景画像や環境マップは参照しない。
-    // 反射は水面近くで減衰し、波が傾くと明暗が変わる。時刻だけでは動かさない。
-    float facing = exp(-pow((slope + 0.12f) * 2.5f, 2.0f));
-    float lightPatch = exp(-pow((x - 0.28f + depth * 0.7f) / 0.28f, 2.0f));
-    float reflection = facing * (0.08f + lightPatch * 0.22f) * exp(-depth * 32);
-    color = mix(color, float3(0.86f,0.96f,1.0f), reflection);
-    // 水面の縁に途切れる反射を置き、丸みを表す。輪郭に沿う暗い線は付けない。
-    // 太さは画面幅基準。白い一本線にならないよう波の傾きで反射を弱める。
-    float lipDepth = max(0.0f, distance) / max(1.0f, s.viewport.x * 0.018f);
-    float crest = exp(-pow((lipDepth - 0.22f) * 4.5f, 2.0f));
-    color = mix(color, float3(0.79f,0.94f,0.98f),
-                crest * (0.10f + 0.32f * facing * lightPatch));
-    return color;
+// パレットの浅部・深部を基準に、光路長によるRGBごとの指数減衰を近似する。
+// 光路長は水深や丸い断面から推定した表示用の値。背景の透過光はサンプルしない。
+float3 attenuatedWaterColor(float3 nearColor, float3 farColor, float opticalDepth) {
+    float3 transmission = clamp(farColor / max(nearColor, float3(0.001f)), 0.015f, 1.0f);
+    return nearColor * exp(log(transmission) * clamp(opticalDepth, 0.0f, 2.0f));
+}
+
+// 空気と水の境界を想定したSchlick近似。正面の反射率は約2%。
+float waterFresnel(float viewCosine) {
+    return 0.0204f + 0.9796f * pow(1 - clamp(viewCosine, 0.0f, 1.0f), 5.0f);
+}
+
+// 固定された広い光源と細い光源を映す。背景・環境テクスチャや時刻には依存しない。
+float waterReflection(float3 normal) {
+    float3 reflected = reflect(float3(0, 0, -1), normal);
+    float softbox = exp(-pow((reflected.x + 0.35f) / 0.42f, 2.0f)
+                        -pow((reflected.y - 0.60f) / 0.65f, 2.0f));
+    float strip = exp(-pow((reflected.x + 0.27f) / 0.075f, 2.0f)
+                      -pow((reflected.y - 0.45f) / 0.80f, 2.0f));
+    return min(0.65f, waterFresnel(normal.z) * (0.20f + 0.80f * softbox)
+               + 0.25f * strip * sqrt(max(0.0f, normal.z)));
+}
+
+// 水面直下の丸みと波の傾きから法線を推定し、反射を輪郭に追従させる。
+float3 surfaceLighting(float3 color, float x, float depth, float slope) {
+    float curvature = exp(-depth / 0.010f);
+    float3 normal = normalize(float3(-slope * curvature, curvature,
+                                    sqrt(max(0.03f, 1 - curvature * curvature))));
+    float lightPatch = exp(-pow((x - 0.30f + depth * 0.6f) / 0.55f, 2.0f));
+    float reflection = waterReflection(normal) * exp(-depth * 24)
+        * (0.35f + 0.65f * lightPatch);
+    return mix(color, float3(0.90f, 0.97f, 1.0f), reflection);
 }
 
 float3 impactPlumeColor(float x, float depth, constant WaterUniforms &s) {
@@ -156,10 +172,12 @@ float3 impactPlumeColor(float x, float depth, constant WaterUniforms &s) {
     return plume * (0.025f + eddies * 0.075f) * float3(0.7f, 0.95f, 1.0f);
 }
 
-// 水流と水滴で同じ色・光沢を使う。roundnessは断面の中央で1、縁で0。
-float3 roundedWaterColor(float roundness, float highlight, constant WaterUniforms &s) {
-    float3 color = mix(s.edgeColor.rgb, s.streamColor.rgb, roundness);
-    return mix(color, float3(0.85f,0.96f,1.0f), highlight);
+// 水流と水滴の丸い断面では中央ほど光路が長く、薄い縁ほど淡く見せる。
+float3 roundedWaterColor(float3 normal, constant WaterUniforms &s) {
+    float3 nearColor = mix(float3(0.85f, 0.94f, 0.98f), s.streamColor.rgb, 0.42f);
+    float3 farColor = mix(s.streamColor.rgb, s.edgeColor.rgb, 0.25f);
+    float3 color = attenuatedWaterColor(nearColor, farColor, normal.z);
+    return mix(color, float3(0.90f, 0.97f, 1.0f), waterReflection(normal));
 }
 
 // 列ごとの水位を補間し、水面より下だけを半透明に着色する。
@@ -174,9 +192,12 @@ fragment half4 waterFragment(WaterRaster in [[stage_in]],
     float coverage = smoothstep(-0.7f, 0.7f, distance);
     if (coverage <= 0) return half4(0);
     float depth = clamp(surface - in.uv.y, 0.0f, 1.0f);
-    float3 color = mix(s.shallowColor.rgb, s.deepColor.rgb, min(1.0f, depth * 1.5f));
+    // 容器幅で正規化した深さを光路長の代わりにする。縦横比にも追従する。
+    float opticalDepth = depth * max(s.detail.w, 0.5f);
+    float3 nearColor = mix(float3(0.80f, 0.90f, 0.95f), s.shallowColor.rgb, 0.62f);
+    float3 color = attenuatedWaterColor(nearColor, s.deepColor.rgb, opticalDepth * 1.4f);
     float slope = sample.y;
-    color = surfaceLighting(color, in.uv.x, depth, distance, slope, s);
+    color = surfaceLighting(color, in.uv.x, opticalDepth, slope);
     // 広い光の濃淡で単色の面を和らげる。細かな模様や常時動く疑似的な渦は加えない。
     color *= 0.94f + 0.09f * exp(-pow((in.uv.x - 0.3f + depth * 0.4f) / 0.5f, 2.0f));
     color += impactPlumeColor(in.uv.x, depth, s);
@@ -255,9 +276,8 @@ vertex WaterRaster streamVertex(uint id [[vertex_id]], device const WaterVertex 
 // uv.xは帯の横断方向（-1〜1）。端をぼかし、片側に細い光沢を置く。
 fragment half4 streamFragment(WaterRaster in [[stage_in]], constant WaterUniforms &s [[buffer(0)]]) {
     float coverage = 1 - smoothstep(0.82f, 1.0f, abs(in.uv.x));
-    float sheen = exp(-pow((in.uv.x + 0.4f) * 5, 2.0f));
     float body = sqrt(max(0.0f, 1 - in.uv.x * in.uv.x));
-    float3 color = roundedWaterColor(body, sheen * 0.22f, s);
+    float3 color = roundedWaterColor(float3(in.uv.x, 0, body), s);
     float alpha = coverage * s.viewport.z;
     return premultipliedColor(color, alpha);
 }
@@ -266,9 +286,9 @@ fragment half4 streamFragment(WaterRaster in [[stage_in]], constant WaterUniform
 fragment half4 splashFragment(WaterRaster in [[stage_in]], constant WaterUniforms &s [[buffer(0)]]) {
     float distance = length(in.uv);
     float coverage = 1 - smoothstep(0.78f, 1.0f, distance);
-    float2 lightOffset = in.uv - float2(-0.3f, 0.3f);
-    float highlight = exp(-dot(lightOffset, lightOffset) * 14);
-    float3 color = roundedWaterColor(sqrt(max(0.0f, 1 - distance * distance)), highlight * 0.48f, s);
+    float body = sqrt(max(0.0f, 1 - distance * distance));
+    float3 normal = normalize(float3(in.uv.x, -in.uv.y, max(0.001f, body)));
+    float3 color = roundedWaterColor(normal, s);
     float alpha = coverage * s.viewport.z;
     return premultipliedColor(color, alpha);
 }
